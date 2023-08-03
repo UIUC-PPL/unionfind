@@ -5,10 +5,10 @@
 #include <NDMeshStreamer.h>
 
 struct unionFindVertex {
-    long int vertexID;
-    long int parent;
+    uint64_t vertexID;
+    int64_t parent;
     long int componentNumber = -1;
-    std::vector<long int> need_boss_requests; //request queue for processing need_boss requests
+    std::vector<uint64_t> need_boss_requests; //request queue for processing need_boss requests
     long int findOrAnchorCount = 0;
 
     void pup(PUP::er &p) {
@@ -41,7 +41,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     int numMyVertices;
     int pathCompressionThreshold = 5;
     int componentPruneThreshold;
-    std::pair<int, int> (*getLocationFromID)(long int vid);
+    std::pair<int, int> (*getLocationFromID)(uint64_t vid);
     int myLocalNumBosses;
     int totalNumBosses;
     CkCallback postComponentLabelingCb;
@@ -50,22 +50,22 @@ class UnionFindLib : public CBase_UnionFindLib {
     UnionFindLib() {}
     UnionFindLib(CkMigrateMessage *m) { }
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
+    void registerGetLocationFromID(std::pair<int, int> (*gloc)(uint64_t vid));
     void register_phase_one_cb(CkCallback cb);
     void initialize_vertices(unionFindVertex *appVertices, int numVertices);
 #ifndef ANCHOR_ALGO
-    void union_request(long int vid1, long int vid2);
-    void find_boss1(int arrIdx, long int partnerID, long int senderID);
-    void find_boss2(int arrIdx, long int boss1ID, long int senderID);
+    void union_request(uint64_t vid1, uint64_t vid2);
+    void find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID);
+    void find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID);
 #else
-    void union_request(long int v, long int w);
-    void anchor(int w_arrIdx, long int v, long int path_base_arrIdx);
+    void union_request(uint64_t v, uint64_t w);
+    void anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx);
 #endif
-    void local_path_compression(unionFindVertex *src, long int compressedParent);
-    bool check_same_chares(long int v1, long int v2);
+    void local_path_compression(unionFindVertex *src, uint64_t compressedParent);
+    bool check_same_chares(uint64_t v1, uint64_t v2);
     void short_circuit_parent(shortCircuitData scd);
-    void compress_path(int arrIdx, long int compressedParent);
-    unionFindVertex* return_vertices();
-    void registerGetLocationFromID(std::pair<int, int> (*gloc)(long int v));
+    void compress_path(int arrIdx, uint64_t compressedParent);
+    unionFindVertex *return_vertices();
 
     // functions and data structures for finding connected components
 
@@ -73,12 +73,12 @@ class UnionFindLib : public CBase_UnionFindLib {
     void find_components(CkCallback cb);
     void boss_count_prefix_done(int totalCount);
     void start_component_labeling();
-    void insertDataNeedBoss(const uint64_t & data);
+    void insertDataNeedBoss(const needBossData & data);
     void insertDataFindBoss(const findBossData & data);
 #ifdef ANCHOR_ALGO
     void insertDataAnchor(const anchorData & data);
 #endif
-    void need_boss(int arrIdx, long int fromID);
+    void need_boss(int arrIdx, uint64_t fromID);
     void set_component(int arrIdx, long int compNum);
     void prune_components(int threshold, CkCallback appReturnCb);
     void perform_pruning();
