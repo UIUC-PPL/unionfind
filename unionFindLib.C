@@ -45,8 +45,21 @@ static void register_merge_count_maps_reduction() {
 
 // class function implementations
 
+/**
+ * @brief registers a function that takes a vertexID and returns its location
+ * 
+ * unionFindLib allows users to specify a vertexID scheme that suits their
+ * usecase, as long as it encodes the chare index of the vertex and array index
+ * of the vertex on the chare's myVertices field. This function registers the
+ * function provided by the user that achieves this decoding, so that the user's
+ * function may be used by unionFindLib for internal functionality
+ * 
+ * @param gloc a function that takes a uint64_t vertexID and returns its chare
+ * index and local array index on that chare's myVertices field as
+ * a std::pair<int, int>
+ */
 void UnionFindLib::
-registerGetLocationFromID(std::pair<int, int> (*gloc)(long int vid)) {
+registerGetLocationFromID(std::pair<int, int> (*gloc)(uint64_t vid)) {
     getLocationFromID = gloc;
 }
 
@@ -58,37 +71,60 @@ register_phase_one_cb(CkCallback cb) {
     CkStartQD(cb);
 }
 
+/**
+ * @brief Adds vertices to this union find chare
+ * 
+ * Takes an array of unionFindVertex with vertex info populated (ID, etc.)
+ * and the length of that array, and stores locally the vertex info
+ * that should be associated with this union find chare.
+ * 
+ * @param appVertices an array of unionFindVertex storing the vertices on the
+ * corresponding partition chare
+ * @param numVertices the number of vertices in the appVertices array
+ */
 void UnionFindLib::
 initialize_vertices(unionFindVertex *appVertices, int numVertices) {
     // local vertices corresponding to one treepiece in application
     numMyVertices = numVertices;
-    myVertices = appVertices; // no need to do memcpy, array in same address space as app
-    /*myVertices = (unionFindVertex*)malloc(numVertices * sizeof(unionFindVertex));
-    memcpy(myVertices, appVertices, sizeof(unionFindVertex)*numVertices);*/
-    /*for (int i = 0; i < numMyVertices; i++) {
-        CkPrintf("[LibProxy %d] myVertices[%d] - vertexID: %ld, parent: %ld, component: %d\n", this->thisIndex, i, myVertices[i].vertexID, myVertices[i].parent, myVertices[i].componentNumber);
-    }*/
+    myVertices = appVertices;
 }
 
+/**
+ * @brief performs a union on two vertices given their vertexIDs
+ * 
+ * assumes the vertexIDs encode the information about the location of the vertex
+ * (it's chare index in the union find lib proxy and the local array index
+ * of the vertex). performs the actual union operation and carries
+ * it's associated runtime cost (cost depends on implementation selected)
+ */
 #ifndef ANCHOR_ALGO
 void UnionFindLib::
-union_request(long int vid1, long int vid2) {
+union_request(uint64_t vid1, uint64_t vid2) {
+    assert(vid1!=vid2);
     if (vid2 < vid1) {
         // found a back edge, flip and reprocess
         union_request(vid2, vid1);
     }
     else {
-        //std::pair<int,int> vid1_loc = appPtr->getLocationFromID(vid1);
         std::pair<int, int> vid1_loc = getLocationFromID(vid1);
+
         //message the chare containing first vertex to find boss1
         //pass the initilizer ID for initiating path compression
 
         findBossData d;
         d.arrIdx = vid1_loc.second;
         d.partnerOrBossID = vid2;
-        d.senderID = -1; // TODO: Is this okay? Or use INT_MIN
+        d.senderID = -1;
         d.isFBOne = 1;
-        this->thisProxy[vid1_loc.first].insertDataFindBoss(d);
+        if(vid1_loc.first == this->thisIndex)
+        {
+            this->insertDataFindBoss(d);
+        }
+        else
+        {
+            this->thisProxy[vid1_loc.first].insertDataFindBoss(d);
+        }
+
 
         //for profiling
         CProxy_UnionFindLibGroup libGroup(libGroupID);
@@ -97,7 +133,7 @@ union_request(long int vid1, long int vid2) {
 }
 #else
 void UnionFindLib::
-union_request(long int v, long int w) {
+union_request(uint64_t v, uint64_t w) {
     std::pair<int, int> w_loc = getLocationFromID(w);
     // message w to anchor to v
     anchorData d;
@@ -109,8 +145,9 @@ union_request(long int v, long int w) {
 
 #ifndef ANCHOR_ALGO
 void UnionFindLib::
-find_boss1(int arrIdx, long int partnerID, long int senderID) {
+find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
     unionFindVertex *src = &myVertices[arrIdx];
+    CkAssert(src->vertexID != src->parent);
     src->findOrAnchorCount++;
 
     if (src->parent == -1) {
@@ -124,7 +161,15 @@ find_boss1(int arrIdx, long int partnerID, long int senderID) {
         d.partnerOrBossID = src->vertexID;
         d.senderID = -1;
         d.isFBOne = 0;
-        this->thisProxy[partner_loc.first].insertDataFindBoss(d);
+        if(partner_loc.first == this->thisIndex)
+        {
+            insertDataFindBoss(d);
+        }
+        else
+        {
+            this->thisProxy[partner_loc.first].insertDataFindBoss(d);
+        }
+        
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         libGroup.ckLocalBranch()->increase_message_count();
@@ -202,8 +247,9 @@ find_boss1(int arrIdx, long int partnerID, long int senderID) {
 
 
 void UnionFindLib::
-find_boss2(int arrIdx, long int boss1ID, long int senderID) {
-    unionFindVertex *src = &myVertices[arrIdx];
+find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
+    unionFindVertex *src = &myVertices[arrIdx]; // vid1, other field is vid2 (boss1ID) - same for find_boss1
+    CkAssert(src->vertexID != src->parent);
     src->findOrAnchorCount++;
 
     if (src->parent == -1) {
@@ -272,6 +318,7 @@ find_boss2(int arrIdx, long int boss1ID, long int senderID) {
         // check if sender and current vertex are on different chares
         if (senderID != -1 && !check_same_chares(senderID, curr->vertexID)) {
             // short circuit the sender to point to grandparent
+            
             std::pair<int,int> sender_loc = getLocationFromID(senderID);
             shortCircuitData scd;
             scd.arrIdx = sender_loc.second;
@@ -285,7 +332,7 @@ find_boss2(int arrIdx, long int boss1ID, long int senderID) {
 }
 #else
 void UnionFindLib::
-anchor(int w_arrIdx, long int v, long int path_base_arrIdx) {
+anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
     unionFindVertex *w = &myVertices[w_arrIdx];
     w->findOrAnchorCount++;
 
@@ -365,7 +412,7 @@ anchor(int w_arrIdx, long int v, long int path_base_arrIdx) {
 
 // perform local path compression
 void UnionFindLib::
-local_path_compression(unionFindVertex *src, long int compressedParent) {
+local_path_compression(unionFindVertex *src, uint64_t compressedParent) {
     unionFindVertex* tmp;
     // An infinite loop if this function is called on itself (a node which does not have itself as its parent)
     while (src->parent != compressedParent) {
@@ -378,7 +425,7 @@ local_path_compression(unionFindVertex *src, long int compressedParent) {
 
 // check if two vertices are on same chare
 bool UnionFindLib::
-check_same_chares(long int v1, long int v2) {
+check_same_chares(uint64_t v1, uint64_t v2) {
     std::pair<int,int> v1_loc = getLocationFromID(v1);
     std::pair<int,int> v2_loc = getLocationFromID(v2);
     if (v1_loc.first == v2_loc.first)
@@ -392,11 +439,12 @@ short_circuit_parent(shortCircuitData scd) {
     unionFindVertex *src = &myVertices[scd.arrIdx];
     //CkPrintf("[TP %d] Short circuiting %ld from current parent %ld to grandparent %ld\n", thisIndex, src->vertexID, src->parent, grandparentID);
     src->parent = scd.grandparentID;
+    CkAssert(src->parent != src->vertexID); // TODO: remove assert
 }
 
 // function to implement simple path compression; currently unused
 void UnionFindLib::
-compress_path(int arrIdx, long int compressedParent) {
+compress_path(int arrIdx, uint64_t compressedParent) {
     unionFindVertex *src = &myVertices[arrIdx];
     //message the parent before reseting it
     if (src->vertexID != compressedParent) {//reached the top of path
@@ -415,6 +463,13 @@ return_vertices() {
 
 /** Functions for finding connected components **/
 
+/**
+ * @brief After performing all union_request calls, labels connected components
+ * across all union find chares with coherent indexing starting with index 0 for
+ * component 0
+ * 
+ * @param cb Callback to be invoked after this function has finished
+ */
 void UnionFindLib::
 find_components(CkCallback cb) {
     postComponentLabelingCb = cb;
@@ -433,8 +488,7 @@ find_components(CkCallback cb) {
 
     // send local count to prefix library
     CkCallback doneCb(CkReductionTarget(UnionFindLib, boss_count_prefix_done), thisProxy);
-    Prefix* myPrefixElem = prefixLibArray[thisIndex].ckLocal();
-    myPrefixElem->startPrefixCalculation(myLocalNumBosses, doneCb);
+    prefixLibArray[thisIndex].startPrefixCalculation(myLocalNumBosses, doneCb);
     //CkPrintf("[%d] Local num bosses: %d\n", thisIndex, myLocalNumBosses);
 }
 
@@ -446,7 +500,7 @@ boss_count_prefix_done(int totalCount) {
     Prefix* myPrefixElem = prefixLibArray[thisIndex].ckLocal();
     int v = myPrefixElem->getValue();
     int myStartIndex = v - myLocalNumBosses;
-    //CkPrintf("[%d] My start index: %d\n", thisIndex, myStartIndex);
+    CkAssert(myStartIndex >= 0);
 
     // start labeling my local bosses from myStartIndex
     // ensures sequential numbering of components
@@ -487,7 +541,10 @@ start_component_labeling() {
             // an internal node or leaf node, request parent for boss
             std::pair<int, int> parent_loc = getLocationFromID(v->parent);
             //this->thisProxy[parent_loc.first].need_boss(parent_loc.second, v->vertexID);
-            uint64_t data = ((uint64_t) parent_loc.second) << 32 | ((uint64_t) v->vertexID);
+            // uint64_t data = ((uint64_t) parent_loc.second) << 32 | ((uint64_t) v->vertexID);
+            needBossData data;
+            data.arrIdx = parent_loc.second;
+            data.senderID = v->vertexID;
             this->thisProxy[parent_loc.first].insertDataNeedBoss(data);
         }
     }
@@ -512,9 +569,9 @@ insertDataFindBoss(const findBossData & data) {
 }
 
 void UnionFindLib::
-insertDataNeedBoss(const uint64_t & data) {
-    int arrIdx = (int)(data >> 32);
-    long int fromID = (long int)(data & 0xffffffff);
+insertDataNeedBoss(const needBossData & data) {
+    int arrIdx = data.arrIdx;
+    uint64_t fromID = data.senderID;
     this->need_boss(arrIdx, fromID);
 }
 
@@ -526,17 +583,18 @@ insertDataAnchor(const anchorData & data) {
 #endif
 
 void UnionFindLib::
-need_boss(int arrIdx, long int fromID) {
-    // one of children of this node needs boss, handle by either replying immediately
-    // or queueing the request
+need_boss(int arrIdx, uint64_t fromID) {
+    // one of children of this node needs boss, handle by either 
+    // replying immediately or queueing the request
 
     if (myVertices[arrIdx].componentNumber != -1) {
         // component already set, reply back
         std::pair<int, int> requestor_loc = getLocationFromID(fromID);
-        if (requestor_loc.first == thisIndex)
+        if (requestor_loc.first == thisIndex) {
             set_component(requestor_loc.second, myVertices[arrIdx].componentNumber);
-        else
+        } else {
             this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, myVertices[arrIdx].componentNumber);
+        }
     }
     else {
         // boss still not found, queue the request
@@ -549,19 +607,28 @@ set_component(int arrIdx, long int compNum) {
     myVertices[arrIdx].componentNumber = compNum;
 
     // since component number is set, respond to your requestors
-    std::vector<long int>::iterator req_iter = myVertices[arrIdx].need_boss_requests.begin();
-    while (req_iter != myVertices[arrIdx].need_boss_requests.end()) {
-        long int requestorID = *req_iter;
+    std::vector<uint64_t> need_boss_queue = myVertices[arrIdx].need_boss_requests;
+    while (!need_boss_queue.empty()) {
+        uint64_t requestorID = (need_boss_queue).back();
         std::pair<int, int> requestor_loc = getLocationFromID(requestorID);
-        if (requestor_loc.first == thisIndex)
+        if (requestor_loc.first == thisIndex) {
             set_component(requestor_loc.second, compNum);
-        else
+        } else {
             this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, compNum);
+        }
         // done with current requestor, delete from request queue
-        req_iter = myVertices[arrIdx].need_boss_requests.erase(req_iter);
+        need_boss_queue.pop_back();
     }
 }
 
+/**
+ * @brief discards components with number of vertices less than or equal to the
+ * threshold given and labels them with component number -1
+ * 
+ * @param threshold the minimum number of vertices for a component must be
+ * strictly greater than this number
+ * @param appReturnCb Callback to be invoked upon completion
+ */
 void UnionFindLib::
 prune_components(int threshold, CkCallback appReturnCb) {
     componentPruneThreshold = threshold;
@@ -644,6 +711,7 @@ profiling_count_max(long int maxCount) {
 // library group chare class definitions
 void UnionFindLibGroup::
 build_component_count_array(int *totalCounts, int numElems) {
+    
     //CkPrintf("[PE %d] Count array size: %d\n", thisIndex, numElems);
     component_count_array = new int[numElems];
     memcpy(component_count_array, totalCounts, sizeof(int)*numElems);
@@ -674,7 +742,19 @@ done_profiling(int total_count) {
     }
 }
 
-// library initialization function
+/**
+ * @brief initializes unionFindLib and returns a union find lib proxy
+ * 
+ * Takes a chare array where vertices are stored and creates a union find chare
+ * array that is a shadow array of it. Intended so that when accessing vertices
+ * on the application level, one can easily make a invoke a local function
+ * on the corresponding union find chare using CkLocal()
+ * 
+ * @param clientArray chare array that union find proxy will become shadow array
+ * of
+ * @param n number of chares in the clientArray
+ * @return CProxy_UnionFindLib the chare array union find proxy
+ */
 CProxy_UnionFindLib UnionFindLib::
 unionFindInit(CkArrayID clientArray, int n) {
     CkArrayOptions opts(n);
@@ -688,7 +768,17 @@ unionFindInit(CkArrayID clientArray, int n) {
     prefixLibArray = CProxy_Prefix::ckNew(n, prefix_opts);
 
     libGroupID = CProxy_UnionFindLibGroup::ckNew();
+
+    _UfLibProxy.passLibGroupID(libGroupID, prefixLibArray);
+
     return _UfLibProxy;
+}
+
+void UnionFindLib::passLibGroupID(CkGroupID lgid, CProxy_Prefix pla)
+{
+    prefixLibArray = pla;
+    libGroupID = lgid;
+    _UfLibProxy = this->thisProxy;
 }
 
 #include "unionFindLib.def.h"

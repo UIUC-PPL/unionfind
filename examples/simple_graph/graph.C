@@ -147,7 +147,7 @@ class TreePiece : public CBase_TreePiece {
         libPtr = libProxy[thisIndex].ckLocal();
         libPtr->initialize_vertices(libVertices, numMyVertices);
         libPtr->registerGetLocationFromID(getLocationFromID);
-        contribute(CkCallback(CkReductionTarget(Main, startWork), mainProxy));
+        contribute(CkCallback(CkReductionTarget(Main, Main::startWork), mainProxy));
     }
 
     void doWork() {
@@ -172,7 +172,7 @@ class TreePiece : public CBase_TreePiece {
                 CkAbort("Something wrong in inverted-tree construction!\n");
             }
         }
-        contribute(CkCallback(CkReductionTarget(Main, donePrinting), mainProxy));
+        contribute(CkCallback(CkReductionTarget(Main, Main::donePrinting), mainProxy));
     }
 
     void getConnectedComponents() {
