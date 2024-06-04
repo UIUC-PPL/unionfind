@@ -15,21 +15,21 @@ module unionFindLib {
         entry void register_phase_one_cb(CkCallback cb);
         // functions to build inverted trees
 #ifndef ANCHOR_ALGO
-        entry void find_boss1(int arrIdx, long partnerID, long initID);
-        entry void find_boss2(int arrIdx, long boss1ID, long initID);
+        entry void find_boss1(int arrIdx, uint64_t partnerID, uint64_t initID);
+        entry void find_boss2(int arrIdx, uint64_t boss1ID, uint64_t initID);
 #else
-        entry void anchor(int w_arrIdx, long v, long path_base_arrIdx);
+        entry void anchor(int w_arrIdx, uint64_t v, long path_base_arrIdx);
 #endif
         // function for grandparent short-circuiting
         entry [aggregate] void short_circuit_parent(shortCircuitData scd);
 
         // function for path compression support
-        entry void compress_path(int arrIdx, long compressedParent);
+        entry void compress_path(int arrIdx, uint64_t compressedParent);
 
         // functions to perform distributed connected components
         entry void find_components(CkCallback cb);
         entry [reductiontarget] void boss_count_prefix_done(int totalCount);
-        entry void need_boss(int arrIdx, int fromID);
+        entry void need_boss(int arrIdx, uint64_t fromID);
         entry void set_component(int arrIdx, int compNum);
 
         // functions to prune out small components
@@ -40,7 +40,7 @@ module unionFindLib {
 
         // TRAM functions
         entry [aggregate] void insertDataFindBoss(const findBossData & data);
-        entry [aggregate] void insertDataNeedBoss(const uint64_t & data);
+        entry [aggregate] void insertDataNeedBoss(const needBossData & data);
 #ifdef ANCHOR_ALGO
         entry [aggregate] void insertDataAnchor(const anchorData & data);
 #endif

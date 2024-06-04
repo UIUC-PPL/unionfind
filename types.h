@@ -12,6 +12,16 @@ struct findBossData {
     }
 };
 
+struct needBossData {
+    uint64_t arrIdx;
+    uint64_t senderID;
+
+    void pup(PUP::er &p) {
+        p|arrIdx;
+        p|senderID;
+    }
+};
+
 #ifdef ANCHOR_ALGO
 struct anchorData {
     uint64_t arrIdx;
@@ -26,7 +36,7 @@ struct anchorData {
 
 struct shortCircuitData {
     uint64_t arrIdx;
-    uint64_t grandparentID;
+    int64_t grandparentID;
 
     void pup(PUP::er &p) {
         p|arrIdx;
