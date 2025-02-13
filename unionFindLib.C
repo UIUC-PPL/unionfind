@@ -433,8 +433,7 @@ find_components(CkCallback cb) {
 
     // send local count to prefix library
     CkCallback doneCb(CkReductionTarget(UnionFindLib, boss_count_prefix_done), thisProxy);
-    Prefix* myPrefixElem = prefixLibArray[thisIndex].ckLocal();
-    myPrefixElem->startPrefixCalculation(myLocalNumBosses, doneCb);
+    prefixLibArray[thisIndex].startPrefixCalculation(myLocalNumBosses, doneCb);
     //CkPrintf("[%d] Local num bosses: %d\n", thisIndex, myLocalNumBosses);
 }
 
