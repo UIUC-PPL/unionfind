@@ -493,20 +493,18 @@ start_component_labeling() {
         if (v->componentNumber == -1) {
             //if the parent's component is cached
             //if(auto search = parentCache.find(v->parent); search != parentCache.end())
-            /*
             if(parentCache.count(v->parent) != 0)
             {
                 set_component(i, parentCache[v->parent]);
             }
             else
             {
-            */
                 // an internal node or leaf node, request parent for boss
                 std::pair<int, int> parent_loc = getLocationFromID(v->parent);
                 //this->thisProxy[parent_loc.first].need_boss(parent_loc.second, v->vertexID);
                 uint64_t data = ((uint64_t) parent_loc.second) << 32 | ((uint64_t) v->vertexID);
                 this->thisProxy[parent_loc.first].insertDataNeedBoss(data);
-            //}
+            }
         }
     }
 
@@ -566,7 +564,6 @@ void UnionFindLib::
 set_component(int arrIdx, long int compNum) {
     myVertices[arrIdx].componentNumber = compNum;
     std::pair<int, int> parent_loc = getLocationFromID(myVertices[arrIdx].parent);
-    /*
     if(parent_loc.first != thisIndex)
     {
         //if(auto search = parentCache.find(myVertices[arrIdx].parent); search == parentCache.end())
@@ -575,7 +572,6 @@ set_component(int arrIdx, long int compNum) {
             parentCache[myVertices[arrIdx].parent] = compNum;
         }
     }
-    */
 
     // since component number is set, respond to your requestors
     std::vector<long int>::iterator req_iter = myVertices[arrIdx].need_boss_requests.begin();
