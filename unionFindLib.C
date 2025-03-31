@@ -556,7 +556,11 @@ need_boss(int arrIdx, long int fromID) {
     }
     else {
         // boss still not found, queue the request
-        myVertices[arrIdx].need_boss_requests.push_back(fromID);
+        if(parentCache.count(myVertices[arrIdx].parent) != 0)
+        {
+            set_component(arrIdx, parentCache[myVertices[arrIdx].parent]);
+        }
+        else myVertices[arrIdx].need_boss_requests.push_back(fromID);
     }
 }
 
