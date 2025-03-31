@@ -14,6 +14,7 @@
 class Main : public CBase_Main {
     CProxy_TreePiece tpProxy;
     double startTime;
+    double componentDetectionStartTime;
     public:
     Main(CkArgMsg *m) {
         if (m->argc != 3) {
@@ -65,6 +66,7 @@ class Main : public CBase_Main {
     void done() {
         CkPrintf("[Main] Inverted trees constructed. Notify library to perform components detection\n");
         CkPrintf("[Main] Tree construction time: %f\n", CkWallTimer()-startTime);
+        componentDetectionStartTime = CkWallTimer();
         // callback for library to inform application after completing
         // connected components detection
         CkCallback cb(CkIndex_Main::doneFindComponents(), thisProxy);
@@ -74,7 +76,7 @@ class Main : public CBase_Main {
 
     void doneFindComponents() {
         CkPrintf("[Main] Components identified, prune unecessary ones now\n");
-        CkPrintf("[Main] Components detection time: %f\n", CkWallTimer()-startTime);
+        CkPrintf("[Main] Components detection time: %f\n", CkWallTimer()-componentDetectionStartTime);
         // callback for library to report to after pruning
         CkCallback cb(CkIndex_TreePiece::requestVertices(), tpProxy);
         libProxy.prune_components(1, cb);

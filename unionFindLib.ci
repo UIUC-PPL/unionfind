@@ -21,7 +21,7 @@ module unionFindLib {
         entry void anchor(int w_arrIdx, long v, long path_base_arrIdx);
 #endif
         // function for grandparent short-circuiting
-        entry [aggregate] void short_circuit_parent(shortCircuitData scd);
+        entry void short_circuit_parent(shortCircuitData scd);
 
         // function for path compression support
         entry void compress_path(int arrIdx, long compressedParent);
@@ -39,10 +39,10 @@ module unionFindLib {
         //entry [reductiontarget] void merge_count_results(int totalCounts[numElems], int numElems);
 
         // TRAM functions
-        entry [aggregate] void insertDataFindBoss(const findBossData & data);
-        entry [aggregate] void insertDataNeedBoss(const uint64_t & data);
+        entry void insertDataFindBoss(const findBossData & data);
+        entry void insertDataNeedBoss(const uint64_t & data);
 #ifdef ANCHOR_ALGO
-        entry [aggregate] void insertDataAnchor(const anchorData & data);
+        entry void insertDataAnchor(const anchorData & data);
 #endif
 #ifdef PROFILING
         entry [reductiontarget] void profiling_count_max(long maxCount);

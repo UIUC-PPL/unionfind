@@ -3,6 +3,7 @@
 
 #include "unionFindLib.decl.h"
 #include <NDMeshStreamer.h>
+#include <unordered_map>
 
 struct unionFindVertex {
     long int vertexID;
@@ -45,6 +46,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     int myLocalNumBosses;
     int totalNumBosses;
     CkCallback postComponentLabelingCb;
+    std::unordered_map<long int, long int> parentCache; //maps vertex numbers to component numbers
 
     public:
     UnionFindLib() {}

@@ -289,6 +289,8 @@ anchor(int w_arrIdx, long int v, long int path_base_arrIdx) {
     unionFindVertex *w = &myVertices[w_arrIdx];
     w->findOrAnchorCount++;
 
+    //this case is if the vertices are already in the same component
+    //and v is the boss
     if (w->parent == v) {
       // call local_path_compression with v as parent
       if (path_base_arrIdx != -1) {
@@ -298,6 +300,10 @@ anchor(int w_arrIdx, long int v, long int path_base_arrIdx) {
       return;
     }
 
+    //order correction, broken into local and remote cases
+    //in the local case, if your path base is not -1 (so not first on this pe), do local compression
+    //before doing a new anchor with v as the local one
+    //key: efficiently maintain minheap by switching 
     if (w->vertexID < v) {
         // incorrect order, swap the vertices
         std::pair<int, int> v_loc = getLocationFromID(v);
@@ -327,8 +333,9 @@ anchor(int w_arrIdx, long int v, long int path_base_arrIdx) {
         // Make all nodes point to this parent v
         local_path_compression(path_base, v);
       }
-      w->parent = v;
+      w->parent = v; //anchor algo guarantees that v will be smaller here
     }
+    //correct order (w is larger) and not at the root
     else {
         // call anchor for w's parent
         std::pair<int, int> w_parent_loc = getLocationFromID(w->parent);
@@ -339,6 +346,7 @@ anchor(int w_arrIdx, long int v, long int path_base_arrIdx) {
               path_base_arrIdx = w_loc.second; 
             }
             else {
+                //looks like dead code?
               std::pair<int, int> w_loc = getLocationFromID(w->vertexID);
               // assert (path_base_arrIdx != w_loc.second);
             }
@@ -347,7 +355,7 @@ anchor(int w_arrIdx, long int v, long int path_base_arrIdx) {
             return;
         }
         else {
-          // Moving aay from this node; see if local_path_compression should be done
+          // Moving away from this node; see if local_path_compression should be done
           if (path_base_arrIdx != -1) {
             unionFindVertex *path_base = &myVertices[path_base_arrIdx];
             // Make all nodes point to this parent w
@@ -483,11 +491,22 @@ start_component_labeling() {
         }
 
         if (v->componentNumber == -1) {
-            // an internal node or leaf node, request parent for boss
-            std::pair<int, int> parent_loc = getLocationFromID(v->parent);
-            //this->thisProxy[parent_loc.first].need_boss(parent_loc.second, v->vertexID);
-            uint64_t data = ((uint64_t) parent_loc.second) << 32 | ((uint64_t) v->vertexID);
-            this->thisProxy[parent_loc.first].insertDataNeedBoss(data);
+            //if the parent's component is cached
+            //if(auto search = parentCache.find(v->parent); search != parentCache.end())
+            /*
+            if(parentCache.count(v->parent) != 0)
+            {
+                set_component(i, parentCache[v->parent]);
+            }
+            else
+            {
+            */
+                // an internal node or leaf node, request parent for boss
+                std::pair<int, int> parent_loc = getLocationFromID(v->parent);
+                //this->thisProxy[parent_loc.first].need_boss(parent_loc.second, v->vertexID);
+                uint64_t data = ((uint64_t) parent_loc.second) << 32 | ((uint64_t) v->vertexID);
+                this->thisProxy[parent_loc.first].insertDataNeedBoss(data);
+            //}
         }
     }
 
@@ -546,6 +565,17 @@ need_boss(int arrIdx, long int fromID) {
 void UnionFindLib::
 set_component(int arrIdx, long int compNum) {
     myVertices[arrIdx].componentNumber = compNum;
+    std::pair<int, int> parent_loc = getLocationFromID(myVertices[arrIdx].parent);
+    /*
+    if(parent_loc.first != thisIndex)
+    {
+        //if(auto search = parentCache.find(myVertices[arrIdx].parent); search == parentCache.end())
+        if(parentCache.count(myVertices[arrIdx].parent)==0)
+        {
+            parentCache[myVertices[arrIdx].parent] = compNum;
+        }
+    }
+    */
 
     // since component number is set, respond to your requestors
     std::vector<long int>::iterator req_iter = myVertices[arrIdx].need_boss_requests.begin();

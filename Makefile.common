@@ -1,6 +1,6 @@
 #set the following variables to absolute paths
-CHARM_DIR = /Users/raghu/work/charm/charm
-UNION_FIND_DIR = /Users/raghu/work/charm/unionFind/unionFind
+CHARM_DIR = /work/hdd/mzu/rao1/charm/ofi-linux-x86_64-cxi-slurmpmi2cray
+UNION_FIND_DIR = /u/rao1/unionfind
 PREFIX_LIB_DIR = $(UNION_FIND_DIR)/prefixLib
 
 #charmc options
