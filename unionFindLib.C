@@ -495,15 +495,40 @@ start_component_labeling() {
             //if(auto search = parentCache.find(v->parent); search != parentCache.end())
             if(parentCache.count(v->parent) != 0)
             {
-                set_component(i, parentCache[v->parent]);
+                //check if the cache entry has a component number
+                if(parentCache[v->parent].compNum != -1)
+                {
+                    //call set component on myself
+                    set_component(i, parentCache[v->parent].compNum);
+                    //then loop over and call set component on the waiting requests (should only run once per cache entry)
+                    for(int j=0; j<parentCache[v->parent].requestors.size(); j++)
+                    {
+                        set_component(parentCache[v->parent].requestors[j], parentCache[v->parent].compNum);
+                    }
+                    parentCache[v->parent].requestors.clear();
+                }
+                else
+                {
+                    parentCache[v->parent].requestors.push_back((long int) i);
+                }
             }
             else
             {
                 // an internal node or leaf node, request parent for boss
                 std::pair<int, int> parent_loc = getLocationFromID(v->parent);
-                //this->thisProxy[parent_loc.first].need_boss(parent_loc.second, v->vertexID);
                 uint64_t data = ((uint64_t) parent_loc.second) << 32 | ((uint64_t) v->vertexID);
-                this->thisProxy[parent_loc.first].insertDataNeedBoss(data);
+                //make cache entry and send remote request
+                cacheEntry newEntry;
+                newEntry.compNum = -1;
+                parentCache[v->parent] = newEntry;
+                if(parent_loc.first == thisIndex)
+                {
+                    insertDataNeedBoss(data);
+                }
+                else
+                {
+                    this->thisProxy[parent_loc.first].insertDataNeedBoss(data);
+                }
             }
         }
     }
@@ -556,11 +581,7 @@ need_boss(int arrIdx, long int fromID) {
     }
     else {
         // boss still not found, queue the request
-        if(parentCache.count(myVertices[arrIdx].parent) != 0)
-        {
-            set_component(arrIdx, parentCache[myVertices[arrIdx].parent]);
-        }
-        else myVertices[arrIdx].need_boss_requests.push_back(fromID);
+        myVertices[arrIdx].need_boss_requests.push_back(fromID);
     }
 }
 
@@ -570,10 +591,16 @@ set_component(int arrIdx, long int compNum) {
     std::pair<int, int> parent_loc = getLocationFromID(myVertices[arrIdx].parent);
     if(parent_loc.first != thisIndex)
     {
-        //if(auto search = parentCache.find(myVertices[arrIdx].parent); search == parentCache.end())
-        if(parentCache.count(myVertices[arrIdx].parent)==0)
+        //if the parent cache entry exists (it should by this point)
+        int my_parent = myVertices[arrIdx].parent;
+        if(parentCache.count(my_parent)!=0)
         {
-            parentCache[myVertices[arrIdx].parent] = compNum;
+            parentCache[my_parent].compNum = compNum;
+            for(int j=0; j<parentCache[my_parent].requestors.size(); j++)
+            {
+                set_component(parentCache[my_parent].requestors[j], compNum);
+            }
+            
         }
     }
 

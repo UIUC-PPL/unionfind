@@ -30,6 +30,16 @@ struct componentCountMap {
     }
 };
 
+typedef struct componentCacheEntry {
+    long int compNum;
+    std::vector<long int> requestors;
+
+    void pup(PUP::er &p) {
+        p|compNum;
+        p|requestors;
+    }
+} cacheEntry;
+
 
 /* global variables */
 /*readonly*/ extern CkGroupID libGroupID;
@@ -46,7 +56,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     int myLocalNumBosses;
     int totalNumBosses;
     CkCallback postComponentLabelingCb;
-    std::unordered_map<long int, long int> parentCache; //maps vertex numbers to component numbers
+    std::unordered_map<long int, cacheEntry> parentCache; //maps vertex numbers to component numbers
 
     public:
     UnionFindLib() {}
