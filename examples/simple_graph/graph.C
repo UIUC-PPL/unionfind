@@ -78,8 +78,9 @@ class Main : public CBase_Main {
         CkPrintf("[Main] Components identified, prune unecessary ones now\n");
         CkPrintf("[Main] Components detection time: %f\n", CkWallTimer()-componentDetectionStartTime);
         // callback for library to report to after pruning
-        CkCallback cb(CkIndex_TreePiece::requestVertices(), tpProxy);
-        libProxy.prune_components(1, cb);
+        CkExit();
+        //CkCallback cb(CkIndex_TreePiece::requestVertices(), tpProxy);
+        //libProxy.prune_components(1, cb);
     }
 
     void donePrinting() {
@@ -206,8 +207,11 @@ TreePiece::getLocationFromID(long int vid) {
 
 std::pair<int, int>
 TreePiece::getLocationFromID(long int vid) {
-    int chareIdx = (vid-1) % NUM_TREEPIECES;
-    int arrIdx = (vid-1) / NUM_TREEPIECES;
+    int target_per_chare = NUM_VERTICES/NUM_TREEPIECES;
+    int chareIdx = (vid-1) / target_per_chare;
+    if(chareIdx>=NUM_TREEPIECES) chareIdx = NUM_TREEPIECES - 1;
+    int arrIdx = (vid-1) - (chareIdx * target_per_chare);
+    //int arrIdx = (vid-1) / NUM_TREEPIECES;
     return std::make_pair(chareIdx, arrIdx);
 }
 
