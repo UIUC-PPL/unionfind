@@ -449,6 +449,7 @@ find_components(CkCallback cb) {
 void UnionFindLib::
 boss_count_prefix_done(int totalCount) {
     totalNumBosses = totalCount;
+    if(thisIndex==0) CkPrintf("Number of components found: %d\n", totalNumBosses);
     // access value from prefix lib elem to find starting index
     Prefix* myPrefixElem = prefixLibArray[thisIndex].ckLocal();
     int v = myPrefixElem->getValue();
