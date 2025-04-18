@@ -1,5 +1,5 @@
 include ../Makefile.common
-CFLAGS = -DHISTO
+CFLAGS = -DUNIONFIND
 
 all: libhtram_group.a
 
