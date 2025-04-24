@@ -4,6 +4,11 @@
 #include "unionFindLib.decl.h"
 #include <NDMeshStreamer.h>
 #include <unordered_map>
+#include "htram_group.h"
+
+//tram
+using tram_proxy_t = CProxy_HTram;
+using tram_t = HTram;
 
 struct unionFindVertex {
     long int vertexID;
@@ -11,6 +16,7 @@ struct unionFindVertex {
     long int componentNumber = -1;
     std::vector<long int> need_boss_requests; //request queue for processing need_boss requests
     long int findOrAnchorCount = 0;
+    tram_proxy_t tram_proxy;
 
     void pup(PUP::er &p) {
         p|vertexID;

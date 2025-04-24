@@ -1,5 +1,6 @@
 module unionFindLib {
     extern module prefixBalance;
+    extern module htram_group;
 
     include "types.h";
     // initnode function to register custom reduction

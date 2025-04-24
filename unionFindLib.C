@@ -7,6 +7,10 @@
 /*readonly*/ CkGroupID libGroupID;
 CkReduction::reducerType mergeCountMapsReductionType;
 
+/* readonly */ CProxy_HTramRecv nodeGrpProxy;
+/* readonly */ CProxy_HTramNodeGrp srcNodeGrpProxy;
+
+
 // custom reduction for merging local count maps
 CkReductionMsg* merge_count_maps(int nMsgs, CkReductionMsg **msgs) {
     std::unordered_map<long int,int> merged_temp_map;
@@ -743,6 +747,13 @@ unionFindInit(CkArrayID clientArray, int n) {
     CkArrayOptions prefix_opts(n);
     prefix_opts.bindTo(_UfLibProxy);
     prefixLibArray = CProxy_Prefix::ckNew(n, prefix_opts);
+
+    //tram init
+    nodeGrpProxy = CProxy_HTramRecv::ckNew();
+    srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
+    CkCallback ignore_cb(CkCallback::ignore);
+    //note buffer size: not used in smp
+    tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), 1024, false, static_cast<double>(0.01)/1000, false,true, ignore_cb);
 
     libGroupID = CProxy_UnionFindLibGroup::ckNew();
     return _UfLibProxy;
