@@ -10,13 +10,14 @@
 using tram_proxy_t = CProxy_HTram;
 using tram_t = HTram;
 
+extern tram_proxy_t tram_proxy;
+
 struct unionFindVertex {
     long int vertexID;
     long int parent;
     long int componentNumber = -1;
     std::vector<long int> need_boss_requests; //request queue for processing need_boss requests
     long int findOrAnchorCount = 0;
-    tram_proxy_t tram_proxy;
 
     void pup(PUP::er &p) {
         p|vertexID;
@@ -63,11 +64,14 @@ class UnionFindLib : public CBase_UnionFindLib {
     int totalNumBosses;
     CkCallback postComponentLabelingCb;
     std::unordered_map<long int, cacheEntry> parentCache; //maps vertex numbers to component numbers
+    tram_t* tram;
+    tram_proxy_t myTramProxy;
 
     public:
     UnionFindLib() {}
     UnionFindLib(CkMigrateMessage *m) { }
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
+    void set_tram_proxy(tram_proxy_t proxy);
     void register_phase_one_cb(CkCallback cb);
     void initialize_vertices(unionFindVertex *appVertices, int numVertices);
 #ifndef ANCHOR_ALGO
@@ -75,6 +79,10 @@ class UnionFindLib : public CBase_UnionFindLib {
     void find_boss1(int arrIdx, long int partnerID, long int senderID);
     void find_boss2(int arrIdx, long int boss1ID, long int senderID);
 #else
+    static void insertDataCaller(void *p, anchorData data) {
+        UnionFindLib *lib = (UnionFindLib *)p;
+        lib->insertDataAnchor(data);
+    }
     void union_request(long int v, long int w);
     void anchor(int w_arrIdx, long int v, long int path_base_arrIdx);
 #endif

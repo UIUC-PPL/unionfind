@@ -9,6 +9,7 @@ CkReduction::reducerType mergeCountMapsReductionType;
 
 /* readonly */ CProxy_HTramRecv nodeGrpProxy;
 /* readonly */ CProxy_HTramNodeGrp srcNodeGrpProxy;
+/* readonly */ tram_proxy_t tram_proxy;
 
 
 // custom reduction for merging local count maps
@@ -102,12 +103,15 @@ union_request(long int vid1, long int vid2) {
 #else
 void UnionFindLib::
 union_request(long int v, long int w) {
+    tram = myTramProxy.ckLocalBranch();
+    tram->set_func_ptr(UnionFindLib::insertDataCaller, this);
     std::pair<int, int> w_loc = getLocationFromID(w);
     // message w to anchor to v
     anchorData d;
     d.arrIdx = w_loc.second;
     d.v = v;
-    thisProxy[w_loc.first].insertDataAnchor(d);
+    //thisProxy[w_loc.first].insertDataAnchor(d);
+    tram->insertValue(d, w_loc.first);
 }
 #endif
 
@@ -328,7 +332,8 @@ anchor(int w_arrIdx, long int v, long int path_base_arrIdx) {
         anchorData d;
         d.arrIdx = v_loc.second;
         d.v = w->parent;
-        thisProxy[v_loc.first].insertDataAnchor(d);;
+        //thisProxy[v_loc.first].insertDataAnchor(d);
+        tram->insertValue(d, v_loc.first);
     }
     else if (w->parent == w->vertexID) {
       // I have reached the root; check if I can call local_path_compression
@@ -370,7 +375,8 @@ anchor(int w_arrIdx, long int v, long int path_base_arrIdx) {
         anchorData d;
         d.arrIdx = w_parent_loc.second;
         d.v = v;
-        thisProxy[w_parent_loc.first].insertDataAnchor(d);
+        //thisProxy[w_parent_loc.first].insertDataAnchor(d);
+        tram->insertValue(d, w_parent_loc.first);
     }
 }
 #endif
@@ -565,6 +571,7 @@ insertDataNeedBoss(const uint64_t & data) {
 }
 
 #ifdef ANCHOR_ALGO
+
 void UnionFindLib::
 insertDataAnchor(const anchorData & data) {
     anchor(data.arrIdx, data.v, -1);
@@ -735,25 +742,29 @@ done_profiling(int total_count) {
     }
 }
 
+void UnionFindLib::set_tram_proxy(tram_proxy_t proxy) {
+    myTramProxy = proxy;
+}
+
 // library initialization function
 CProxy_UnionFindLib UnionFindLib::
 unionFindInit(CkArrayID clientArray, int n) {
     CkArrayOptions opts(n);
     opts.bindTo(clientArray);
-    _UfLibProxy = CProxy_UnionFindLib::ckNew(opts, NULL);
-
-    // create prefix library array here, prefix library is used in Phase 1B
-    // Binding order: prefix -> unionFind -> app array
-    CkArrayOptions prefix_opts(n);
-    prefix_opts.bindTo(_UfLibProxy);
-    prefixLibArray = CProxy_Prefix::ckNew(n, prefix_opts);
-
     //tram init
     nodeGrpProxy = CProxy_HTramRecv::ckNew();
     srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
     CkCallback ignore_cb(CkCallback::ignore);
     //note buffer size: not used in smp
     tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), 1024, false, static_cast<double>(0.01)/1000, false,true, ignore_cb);
+    _UfLibProxy = CProxy_UnionFindLib::ckNew(opts, NULL);
+
+    _UfLibProxy.set_tram_proxy(tram_proxy);
+    // create prefix library array here, prefix library is used in Phase 1B
+    // Binding order: prefix -> unionFind -> app array
+    CkArrayOptions prefix_opts(n);
+    prefix_opts.bindTo(_UfLibProxy);
+    prefixLibArray = CProxy_Prefix::ckNew(n, prefix_opts);
 
     libGroupID = CProxy_UnionFindLibGroup::ckNew();
     return _UfLibProxy;

@@ -14,6 +14,7 @@ module unionFindLib {
         entry UnionFindLib();
         // function to register Phase 1 callback
         entry void register_phase_one_cb(CkCallback cb);
+        entry void set_tram_proxy(CProxy_HTram proxy);
         // functions to build inverted trees
 #ifndef ANCHOR_ALGO
         entry void find_boss1(int arrIdx, long partnerID, long initID);

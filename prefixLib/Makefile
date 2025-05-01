@@ -1,4 +1,4 @@
-CHARMC=/work/hdd/mzu/rao1/charm/ofi-linux-x86_64-cxi-slurmpmi2cray/bin/charmc $(OPTS)
+CHARMC=/work/hdd/mzu/rao1/charm/ofi-linux-x86_64-cxi-slurmpmi2cray-smp/bin/charmc $(OPTS)
 
 all: libprefix.a
 
