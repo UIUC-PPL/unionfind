@@ -16,7 +16,7 @@
 #include "packet.h"
 using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
-#define BUFSIZE 512//1024//512//1024
+#define BUFSIZE 2048//1024//512//1024
 #define LOCAL_BUFSIZE 16//8
 #define PPN_COUNT 8
 #define NODE_COUNT 512

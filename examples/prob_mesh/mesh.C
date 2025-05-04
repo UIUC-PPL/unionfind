@@ -11,6 +11,7 @@
 class Main : public CBase_Main {
     CProxy_MeshPiece mpProxy;
     double start_time;
+    double componentDetectionStartTime;
 
     public:
     Main(CkArgMsg *m) {
@@ -41,8 +42,9 @@ class Main : public CBase_Main {
     }
 
     void doneInvertedTree() {
-        CkPrintf("[Main] Inveretd trees constructed. Notify library to do component detection\n");
+        CkPrintf("[Main] Inverted trees constructed. Notify library to do component detection\n");
         CkPrintf("[Main] Tree construction time: %f\n", CkWallTimer()-start_time);
+        componentDetectionStartTime = CkWallTimer();
        /* // ask the lib group chares to contribute counts
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         libGroup.contribute_count();*/
@@ -52,7 +54,7 @@ class Main : public CBase_Main {
 
     void doneFindComponents() {
         CkPrintf("[Main] Components identified, prune unecessary ones now\n");
-        CkPrintf("[Main] Components detection time: %f\n", CkWallTimer()-start_time);
+        CkPrintf("[Main] Components detection time: %f\n", CkWallTimer()-componentDetectionStartTime);
         // callback for library to report to after pruning
         CkExit();
         //CkCallback cb(CkIndex_MeshPiece::printVertices(), mpProxy);
