@@ -25,3 +25,14 @@ will be added soon.
 * Priority for some messages
 * Testing with large graph datasets (probabilistic meshes)
 * Integration with Changa
+
+### Installation
+```
+$ git clone https://github.com/UIUC-PPL/unionfind.git
+$ cd prefixLib
+edit CHARMC path in Makefile
+$ make
+$ cd ..
+edit CHARM_DIR and UNION_FIND_DIR in Makefile.common
+$ make
+```

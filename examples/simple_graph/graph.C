@@ -178,7 +178,7 @@ class TreePiece : public CBase_TreePiece {
     void getConnectedComponents() {
         //libPtr->find_components();
         for (int i = 0; i < numMyVertices; i++) {
-            CkPrintf("[tp%d] myVertices[%d] - vertexID: %ld, parent: %ld, component: %d\n", thisIndex, i, libVertices[i].vertexID, libVertices[i].parent, libVertices[i].componentNumber);
+            CkPrintf("[tp%d] myVertices[%d] - vertexID: %ld, parent: %ld, component: %ld\n", thisIndex, i, libVertices[i].vertexID, libVertices[i].parent, libVertices[i].componentNumber);
         }
     }
 
