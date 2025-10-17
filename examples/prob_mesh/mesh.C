@@ -41,7 +41,7 @@ class Main : public CBase_Main {
     }
 
     void doneInvertedTree() {
-        CkPrintf("[Main] Inveretd trees constructed. Notify library to do component detection\n");
+        CkPrintf("[Main] Inverted trees constructed. Notify library to do component detection\n");
         CkPrintf("[Main] Tree construction time: %f\n", CkWallTimer()-start_time);
        /* // ask the lib group chares to contribute counts
         CProxy_UnionFindLibGroup libGroup(libGroupID);
