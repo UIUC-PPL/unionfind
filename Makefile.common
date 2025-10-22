@@ -1,13 +1,13 @@
 #set the following variables to absolute paths
-CHARM_DIR = $(HOME)/Documents/nbodydir/charm
-UNION_FIND_DIR = $(HOME)/Documents/nbodydir/unionfind
+CHARM_DIR = $(HOME)/charm
+UNION_FIND_DIR = $(HOME)/unionfind
 PREFIX_LIB_DIR = $(UNION_FIND_DIR)/prefixLib
 
 #charmc options
 ANCHOR= -DANCHOR_ALGO
 #ANCHOR= 
 PROFILE= -DPROFILING
-CHARMC = $(CHARM_DIR)/bin/charmc $(PROFILE) #$(ANCHOR)
+CHARMC = $(CHARM_DIR)/bin/charmc $(PROFILE) $(ANCHOR)
 OPTS = -std=c++11 -O3 -g
 LD_OPTS =
 
