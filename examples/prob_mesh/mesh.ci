@@ -9,7 +9,7 @@ mainmodule mesh {
 
     mainchare Main {
         entry Main(CkArgMsg *m);
-        entry void doneInveretdTree();
+        entry void doneInvertedTree();
         entry void doneFindComponents();
         entry [reductiontarget] void donePrinting();
     }
