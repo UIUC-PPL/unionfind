@@ -19,11 +19,11 @@ module unionFindLib {
         // function to register Phase 1 callback
         entry void register_phase_one_cb(CkCallback cb);
         // functions to build inverted trees
+        entry void union_request(uint64_t v, uint64_t w);
 #ifndef ANCHOR_ALGO
         entry void find_boss1(int arrIdx, uint64_t partnerID, uint64_t initID);
         entry void find_boss2(int arrIdx, uint64_t boss1ID, uint64_t initID);
 #else
-        entry void union_request(uint64_t v, uint64_t w);
         entry void anchor(int w_arrIdx, uint64_t v, long path_base_arrIdx);
 #endif
         // function for grandparent short-circuiting
