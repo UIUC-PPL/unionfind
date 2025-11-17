@@ -641,6 +641,7 @@ prune_components(int threshold, CkCallback appReturnCb) {
 
     for (int i = 0; i < numMyVertices; i++) {
         long int bossID = myVertices[i].componentNumber;
+        //if(!(bossID >= 0 && bossID < totalNumBosses)) CkPrintf("Total bosses: %d, bossID: %ld\n", totalNumBosses, bossID);
         CkAssert(bossID >= 0 && bossID < totalNumBosses);
         localCounts[bossID]++;
     }
