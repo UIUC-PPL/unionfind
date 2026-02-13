@@ -1,5 +1,6 @@
 module unionFindLib {
     extern module prefixBalance;
+    extern module htram_group;
 
     include "types.h";
     // initnode function to register custom reduction
@@ -18,6 +19,7 @@ module unionFindLib {
 
         // function to register Phase 1 callback
         entry void register_phase_one_cb(CkCallback cb);
+        entry void set_tram_proxy(CProxy_HTram proxy);
         // functions to build inverted trees
         entry void union_request(uint64_t v, uint64_t w);
 #ifndef ANCHOR_ALGO
@@ -27,7 +29,7 @@ module unionFindLib {
         entry void anchor(int w_arrIdx, uint64_t v, long path_base_arrIdx);
 #endif
         // function for grandparent short-circuiting
-        entry [aggregate] void short_circuit_parent(shortCircuitData scd);
+        entry void short_circuit_parent(shortCircuitData scd);
 
         // function for path compression support
         entry void compress_path(int arrIdx, uint64_t compressedParent);

@@ -3,6 +3,14 @@
 
 #include "unionFindLib.decl.h"
 #include <NDMeshStreamer.h>
+#include <unordered_map>
+#include "htram_group.h"
+
+//tram
+using tram_proxy_t = CProxy_HTram;
+using tram_t = HTram;
+
+extern tram_proxy_t tram_proxy;
 
 struct unionFindVertex {
     uint64_t vertexID;
@@ -29,6 +37,16 @@ struct componentCountMap {
     }
 };
 
+typedef struct componentCacheEntry {
+    long int compNum;
+    std::vector<long int> requestors;
+
+    void pup(PUP::er &p) {
+        p|compNum;
+        p|requestors;
+    }
+} cacheEntry;
+
 
 /* global variables */
 /*readonly*/ extern CkGroupID libGroupID;
@@ -45,12 +63,16 @@ class UnionFindLib : public CBase_UnionFindLib {
     int myLocalNumBosses;
     int totalNumBosses;
     CkCallback postComponentLabelingCb;
+    std::unordered_map<long int, cacheEntry> parentCache; //maps vertex numbers to component numbers
+    tram_t* tram;
+    tram_proxy_t myTramProxy;
 
     public:
     UnionFindLib() {}
     UnionFindLib(CkMigrateMessage *m) { }
     void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla);
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
+    void set_tram_proxy(tram_proxy_t proxy);
     void registerGetLocationFromID(std::pair<int, int> (*gloc)(uint64_t vid));
     void register_phase_one_cb(CkCallback cb);
     void initialize_vertices(unionFindVertex *appVertices, int numVertices);
@@ -59,6 +81,10 @@ class UnionFindLib : public CBase_UnionFindLib {
     void find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID);
     void find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID);
 #else
+    static void insertDataCaller(void *p, anchorData data) {
+        UnionFindLib *lib = (UnionFindLib *)p;
+        lib->insertDataAnchor(data);
+    }
     void union_request(uint64_t v, uint64_t w);
     void anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx);
 #endif

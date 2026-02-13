@@ -7,6 +7,11 @@
 /*readonly*/ CkGroupID libGroupID;
 CkReduction::reducerType mergeCountMapsReductionType;
 
+/* readonly */ CProxy_HTramRecv nodeGrpProxy;
+/* readonly */ CProxy_HTramNodeGrp srcNodeGrpProxy;
+/* readonly */ tram_proxy_t tram_proxy;
+
+
 // custom reduction for merging local count maps
 CkReductionMsg* merge_count_maps(int nMsgs, CkReductionMsg **msgs) {
     std::unordered_map<long int,int> merged_temp_map;
@@ -134,12 +139,15 @@ union_request(uint64_t vid1, uint64_t vid2) {
 #else
 void UnionFindLib::
 union_request(uint64_t v, uint64_t w) {
+    tram = myTramProxy.ckLocalBranch();
+    tram->set_func_ptr(UnionFindLib::insertDataCaller, this);
     std::pair<int, int> w_loc = getLocationFromID(w);
     // message w to anchor to v
     anchorData d;
     d.arrIdx = w_loc.second;
     d.v = v;
-    thisProxy[w_loc.first].insertDataAnchor(d);
+    //thisProxy[w_loc.first].insertDataAnchor(d);
+    tram->insertValue(d, w_loc.first);
 }
 #endif
 
@@ -336,6 +344,8 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
     unionFindVertex *w = &myVertices[w_arrIdx];
     w->findOrAnchorCount++;
 
+    //this case is if the vertices are already in the same component
+    //and v is the boss
     if (w->parent == v) {
       // call local_path_compression with v as parent
       if (path_base_arrIdx != -1) {
@@ -345,6 +355,10 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
       return;
     }
 
+    //order correction, broken into local and remote cases
+    //in the local case, if your path base is not -1 (so not first on this pe), do local compression
+    //before doing a new anchor with v as the local one
+    //key: efficiently maintain minheap by switching 
     if (w->vertexID < v) {
         // incorrect order, swap the vertices
         std::pair<int, int> v_loc = getLocationFromID(v);
@@ -365,7 +379,8 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
         anchorData d;
         d.arrIdx = v_loc.second;
         d.v = w->parent;
-        thisProxy[v_loc.first].insertDataAnchor(d);;
+        //thisProxy[v_loc.first].insertDataAnchor(d);
+        tram->insertValue(d, v_loc.first);
     }
     else if (w->parent == w->vertexID) {
       // I have reached the root; check if I can call local_path_compression
@@ -374,8 +389,9 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
         // Make all nodes point to this parent v
         local_path_compression(path_base, v);
       }
-      w->parent = v;
+      w->parent = v; //anchor algo guarantees that v will be smaller here
     }
+    //correct order (w is larger) and not at the root
     else {
         // call anchor for w's parent
         std::pair<int, int> w_parent_loc = getLocationFromID(w->parent);
@@ -386,6 +402,7 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
               path_base_arrIdx = w_loc.second; 
             }
             else {
+                //looks like dead code?
               std::pair<int, int> w_loc = getLocationFromID(w->vertexID);
               // assert (path_base_arrIdx != w_loc.second);
             }
@@ -394,7 +411,7 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
             return;
         }
         else {
-          // Moving aay from this node; see if local_path_compression should be done
+          // Moving away from this node; see if local_path_compression should be done
           if (path_base_arrIdx != -1) {
             unionFindVertex *path_base = &myVertices[path_base_arrIdx];
             // Make all nodes point to this parent w
@@ -405,7 +422,8 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
         anchorData d;
         d.arrIdx = w_parent_loc.second;
         d.v = v;
-        thisProxy[w_parent_loc.first].insertDataAnchor(d);
+        //thisProxy[w_parent_loc.first].insertDataAnchor(d);
+        tram->insertValue(d, w_parent_loc.first);
     }
 }
 #endif
@@ -496,6 +514,7 @@ find_components(CkCallback cb) {
 void UnionFindLib::
 boss_count_prefix_done(int totalCount) {
     totalNumBosses = totalCount;
+    if(thisIndex==0) CkPrintf("Number of components found: %d\n", totalNumBosses);
     // access value from prefix lib elem to find starting index
     Prefix* myPrefixElem = prefixLibArray[thisIndex].ckLocal();
     int v = myPrefixElem->getValue();
@@ -538,14 +557,43 @@ start_component_labeling() {
         }
 
         if (v->componentNumber == -1) {
-            // an internal node or leaf node, request parent for boss
-            std::pair<int, int> parent_loc = getLocationFromID(v->parent);
-            //this->thisProxy[parent_loc.first].need_boss(parent_loc.second, v->vertexID);
-            // uint64_t data = ((uint64_t) parent_loc.second) << 32 | ((uint64_t) v->vertexID);
-            needBossData data;
-            data.arrIdx = parent_loc.second;
-            data.senderID = v->vertexID;
-            this->thisProxy[parent_loc.first].insertDataNeedBoss(data);
+            //if the parent's component is cached
+            //if(auto search = parentCache.find(v->parent); search != parentCache.end())
+            if(parentCache.count(v->parent) != 0)
+            {
+                //check if the cache entry has a component number
+                if(parentCache[v->parent].compNum != -1)
+                {
+                    //call set component on myself
+                    set_component(i, parentCache[v->parent].compNum);
+                    //then loop over and call set component on the waiting requests (should only run once per cache entry)
+                    for(int j=0; j<parentCache[v->parent].requestors.size(); j++)
+                    {
+                        set_component(parentCache[v->parent].requestors[j], parentCache[v->parent].compNum);
+                    }
+                    parentCache[v->parent].requestors.clear();
+                }
+                else
+                {
+                    parentCache[v->parent].requestors.push_back((long int) i);
+                }
+            }
+            else
+            {
+                // an internal node or leaf node, request parent for boss
+                std::pair<int, int> parent_loc = getLocationFromID(v->parent);
+                needBossData data;
+                data.arrIdx = parent_loc.second;
+                data.senderID = v->vertexID;
+                if(parent_loc.first == thisIndex)
+                {
+                    insertDataNeedBoss(data);
+                }
+                else
+                {
+                    this->thisProxy[parent_loc.first].insertDataNeedBoss(data);
+                }
+            }
         }
     }
 
@@ -576,6 +624,7 @@ insertDataNeedBoss(const needBossData & data) {
 }
 
 #ifdef ANCHOR_ALGO
+
 void UnionFindLib::
 insertDataAnchor(const anchorData & data) {
     anchor(data.arrIdx, data.v, -1);
@@ -605,6 +654,21 @@ need_boss(int arrIdx, uint64_t fromID) {
 void UnionFindLib::
 set_component(int arrIdx, long int compNum) {
     myVertices[arrIdx].componentNumber = compNum;
+    std::pair<int, int> parent_loc = getLocationFromID(myVertices[arrIdx].parent);
+    if(parent_loc.first != thisIndex)
+    {
+        //if the parent cache entry exists (it should by this point)
+        int my_parent = myVertices[arrIdx].parent;
+        if(parentCache.count(my_parent)!=0)
+        {
+            parentCache[my_parent].compNum = compNum;
+            for(int j=0; j<parentCache[my_parent].requestors.size(); j++)
+            {
+                set_component(parentCache[my_parent].requestors[j], compNum);
+            }
+            
+        }
+    }
 
     // since component number is set, respond to your requestors
     std::vector<uint64_t> need_boss_queue = myVertices[arrIdx].need_boss_requests;
@@ -743,6 +807,10 @@ done_profiling(int total_count) {
     }
 }
 
+void UnionFindLib::set_tram_proxy(tram_proxy_t proxy) {
+    myTramProxy = proxy;
+}
+
 /**
  * @brief initializes unionFindLib and returns a union find lib proxy
  * 
@@ -760,8 +828,15 @@ CProxy_UnionFindLib UnionFindLib::
 unionFindInit(CkArrayID clientArray, int n) {
     CkArrayOptions opts(n);
     opts.bindTo(clientArray);
+    //tram init
+    nodeGrpProxy = CProxy_HTramRecv::ckNew();
+    srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
+    CkCallback ignore_cb(CkCallback::ignore);
+    //note buffer size: not used in smp
+    tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), 1024, false, static_cast<double>(0.01)/1000, false,true, ignore_cb);
     _UfLibProxy = CProxy_UnionFindLib::ckNew(opts, NULL);
 
+    _UfLibProxy.set_tram_proxy(tram_proxy);
     // create prefix library array here, prefix library is used in Phase 1B
     // Binding order: prefix -> unionFind -> app array
     CkArrayOptions prefix_opts(n);

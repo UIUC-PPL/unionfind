@@ -5,10 +5,10 @@ all: lib
 lib: libunionFind.a
 
 libunionFind.a : unionFindLib.o
-	$(CHARMC) ${LD_OPTS} -o libunionFind.a unionFindLib.o ${PREFIX_LIBS}
+	$(CHARMC) ${LD_OPTS} -o libunionFind.a unionFindLib.o ${PREFIX_LIBS} ${HTRAM_LIBS}
 
 unionFindLib.o : unionFindLib.C types.h unionFindLib.h unionFindLib.decl.h unionFindLib.def.h
-	$(CHARMC) -c ${OPTS} ${PREFIX_INC} $<
+	$(CHARMC) -c ${OPTS} ${PREFIX_INC} ${HTRAM_INC} $<
 
 unionFindLib.decl.h unionFindLib.def.h : unionFindLib.ci
 	$(CHARMC) -E $<

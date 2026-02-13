@@ -1,3 +1,6 @@
+#ifndef TYPES_H
+#define TYPES_H
+
 struct findBossData {
     uint64_t arrIdx;
     uint64_t partnerOrBossID;
@@ -43,3 +46,5 @@ struct shortCircuitData {
         p|grandparentID;
     }
 };
+
+#endif
