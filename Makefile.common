@@ -1,12 +1,13 @@
 #set the following variables to absolute paths
-CHARM_DIR = /work/hdd/mzu/rao1/charm/ofi-linux-x86_64-cxi-slurmpmi2cray-smp
-UNION_FIND_DIR = /u/rao1/unionfind
+PARENT_DIR = /Users/ritvik
+CHARM_DIR = $(PARENT_DIR)/clean_charm/charm
+UNION_FIND_DIR = $(PARENT_DIR)/unionfind
 PREFIX_LIB_DIR = $(UNION_FIND_DIR)/prefixLib
-HTRAM_LIB_DIR = $(UNION_FIND_DIR)/htram
+HTRAM_LIB_DIR = $(PARENT_DIR)/htram
 
 #charmc options
-ANCHOR= -DANCHOR_ALGO
-#ANCHOR= 
+#ANCHOR= -DANCHOR_ALGO
+ANCHOR= 
 PROFILE= -DPROFILING
 #for datatype declaration
 UNIONFIND= -DUNIONFIND
@@ -18,7 +19,7 @@ LD_OPTS =
 PREFIX_LIBS = -L${PREFIX_LIB_DIR} -lprefix
 PREFIX_INC = -I${PREFIX_LIB_DIR}
 
-HTRAM_LIBS = -L${HTRAM_LIB_DIR} -lhtram_group
+HTRAM_LIBS = -L${HTRAM_LIB_DIR} -lhtram_group_unionfind
 HTRAM_INC = -I${HTRAM_LIB_DIR}
 
 UNION_FIND_LIBS = -L${UNION_FIND_DIR} -lunionFind ${PREFIX_LIBS} ${HTRAM_LIBS}
