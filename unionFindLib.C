@@ -875,6 +875,13 @@ unionFindInit(CkArrayID clientArray, int n) {
 
     _UfLibProxy.passLibGroupID(libGroupID, prefixLibArray);
 
+    #ifdef AGGREGATION
+    // print aggregation option
+    printf("UnionFindLib: Compiled with aggregation optimizations\n");
+    #else
+    printf("UnionFindLib: Compiled without aggregation optimizations\n");
+    #endif
+
     return _UfLibProxy;
 }
 
