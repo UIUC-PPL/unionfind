@@ -103,6 +103,16 @@ initialize_vertices(unionFindVertex *appVertices, int numVertices) {
  * it's associated runtime cost (cost depends on implementation selected)
  */
 #ifndef ANCHOR_ALGO
+
+void UnionFindLib::boss_send(int chare_index, findBossData data) {
+    //send data during boss finding, with or without aggregation based on compilation flag
+    #ifndef AGGREGATION
+    this->thisProxy[chare_index].insertDataFindBoss(data);
+    #else
+    tram->insertValue(data, chare_index);
+    #endif
+}
+
 void UnionFindLib::
 union_request(uint64_t vid1, uint64_t vid2) {
     assert(vid1!=vid2);
@@ -127,7 +137,8 @@ union_request(uint64_t vid1, uint64_t vid2) {
         }
         else
         {
-            this->thisProxy[vid1_loc.first].insertDataFindBoss(d);
+            //remote message to start boss1 find
+            boss_send(vid1_loc.first, d);
         }
 
 
@@ -137,6 +148,16 @@ union_request(uint64_t vid1, uint64_t vid2) {
     }
 }
 #else
+
+void UnionFindLib::anchor_send(int chare_index, anchorData data) {
+    //send data during anchoring, with or without aggregation based on compilation flag
+    #ifndef AGGREGATION
+    this->thisProxy[chare_index].insertDataAnchor(data);
+    #else
+    tram->insertValue(data, chare_index);
+    #endif
+}
+
 void UnionFindLib::
 union_request(uint64_t v, uint64_t w) {
     std::pair<int, int> w_loc = getLocationFromID(w);
@@ -144,8 +165,7 @@ union_request(uint64_t v, uint64_t w) {
     anchorData d;
     d.arrIdx = w_loc.second;
     d.v = v;
-    //thisProxy[w_loc.first].insertDataAnchor(d);
-    tram->insertValue(d, w_loc.first);
+    anchor_send(w_loc.first, d);
 }
 #endif
 
@@ -173,7 +193,8 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
         }
         else
         {
-            this->thisProxy[partner_loc.first].insertDataFindBoss(d);
+            //remote message to start boss2 find
+            boss_send(partner_loc.first, d);
         }
         
 
@@ -234,7 +255,8 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
         d.partnerOrBossID = partnerID;
         d.senderID = curr->vertexID;
         d.isFBOne = 1;
-        this->thisProxy[parent_loc.first].insertDataFindBoss(d);
+        //remote message to continue boss1 find
+        boss_send(parent_loc.first, d);
 
         // check if sender and current vertex are on different chares
         if (senderID != -1 && !check_same_chares(senderID, curr->vertexID)) {
@@ -243,6 +265,7 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
             shortCircuitData scd;
             scd.arrIdx = sender_loc.second;
             scd.grandparentID = curr->parent;
+            //send to path compress across chares
             thisProxy[sender_loc.first].short_circuit_parent(scd);
         }
 
@@ -319,7 +342,8 @@ find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
         d.partnerOrBossID = boss1ID;
         d.senderID = curr->vertexID;
         d.isFBOne = 0;
-        this->thisProxy[parent_loc.first].insertDataFindBoss(d);
+        //remote message to continue boss2 find
+        boss_send(parent_loc.first, d);
 
         // check if sender and current vertex are on different chares
         if (senderID != -1 && !check_same_chares(senderID, curr->vertexID)) {
@@ -329,6 +353,7 @@ find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
             shortCircuitData scd;
             scd.arrIdx = sender_loc.second;
             scd.grandparentID = curr->parent;
+            //send to path compress across chares
             thisProxy[sender_loc.first].short_circuit_parent(scd);
         }
 
@@ -377,8 +402,8 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
         anchorData d;
         d.arrIdx = v_loc.second;
         d.v = w->parent;
-        //thisProxy[v_loc.first].insertDataAnchor(d);
-        tram->insertValue(d, v_loc.first);
+        //remote anchor send
+        anchor_send(v_loc.first, d);
     }
     else if (w->parent == w->vertexID) {
       // I have reached the root; check if I can call local_path_compression
@@ -420,8 +445,7 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
         anchorData d;
         d.arrIdx = w_parent_loc.second;
         d.v = v;
-        //thisProxy[w_parent_loc.first].insertDataAnchor(d);
-        tram->insertValue(d, w_parent_loc.first);
+        anchor_send(w_parent_loc.first, d);
     }
 }
 #endif

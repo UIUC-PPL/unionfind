@@ -81,6 +81,7 @@ class UnionFindLib : public CBase_UnionFindLib {
         UnionFindLib *lib = (UnionFindLib *)p;
         lib->insertDataFindBoss(data);
     }
+    void boss_send(int chare_index, findBossData data); //sends during boss finding, with out without aggregation
     void union_request(uint64_t vid1, uint64_t vid2);
     void find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID);
     void find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID);
@@ -89,6 +90,7 @@ class UnionFindLib : public CBase_UnionFindLib {
         UnionFindLib *lib = (UnionFindLib *)p;
         lib->insertDataAnchor(data);
     }
+    void anchor_send(int chare_index, anchorData data); //sends during anchoring, with out without aggregation
     void union_request(uint64_t v, uint64_t w);
     void anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx);
 #endif
