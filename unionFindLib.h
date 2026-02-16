@@ -77,6 +77,10 @@ class UnionFindLib : public CBase_UnionFindLib {
     void register_phase_one_cb(CkCallback cb);
     void initialize_vertices(unionFindVertex *appVertices, int numVertices);
 #ifndef ANCHOR_ALGO
+    static void insertDataCaller(void *p, findBossData data) {
+        UnionFindLib *lib = (UnionFindLib *)p;
+        lib->insertDataFindBoss(data);
+    }
     void union_request(uint64_t vid1, uint64_t vid2);
     void find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID);
     void find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID);

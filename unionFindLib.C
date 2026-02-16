@@ -139,8 +139,6 @@ union_request(uint64_t vid1, uint64_t vid2) {
 #else
 void UnionFindLib::
 union_request(uint64_t v, uint64_t w) {
-    tram = myTramProxy.ckLocalBranch();
-    tram->set_func_ptr(UnionFindLib::insertDataCaller, this);
     std::pair<int, int> w_loc = getLocationFromID(w);
     // message w to anchor to v
     anchorData d;
@@ -807,8 +805,14 @@ done_profiling(int total_count) {
     }
 }
 
+/**
+ * sets the tram proxy
+ * and the func ptr for insertDataCaller
+ */
 void UnionFindLib::set_tram_proxy(tram_proxy_t proxy) {
     myTramProxy = proxy;
+    tram = myTramProxy.ckLocalBranch();
+    tram->set_func_ptr(UnionFindLib::insertDataCaller, this);
 }
 
 /**
