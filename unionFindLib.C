@@ -106,10 +106,16 @@ initialize_vertices(unionFindVertex *appVertices, int numVertices) {
 
 void UnionFindLib::boss_send(int chare_index, findBossData data) {
     //send data during boss finding, with or without aggregation based on compilation flag
+    //get location manager of this proxy
+    CkArray *arr = thisProxy.ckLocalBranch();
+    CkArrayIndex idx(chare_index);
+    //get the pe of the chare to send to from the location manager
+    int pe = arr->lastKnown(idx);
+    //send message to the chare
     #ifndef AGGREGATION
     this->thisProxy[chare_index].insertDataFindBoss(data);
     #else
-    tram->insertValue(data, chare_index);
+    tram->insertValue(data, pe);
     #endif
 }
 
@@ -861,7 +867,7 @@ unionFindInit(CkArrayID clientArray, int n) {
     srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
     CkCallback ignore_cb(CkCallback::ignore);
     //note buffer size: not used in smp
-    tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), 1024, false, static_cast<double>(0.01)/1000, false,true, ignore_cb);
+    tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), 1024, false, static_cast<double>(0.01)/1000, true, true, ignore_cb);
     _UfLibProxy = CProxy_UnionFindLib::ckNew(opts, NULL);
 
     _UfLibProxy.set_tram_proxy(tram_proxy);
