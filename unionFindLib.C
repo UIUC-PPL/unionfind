@@ -156,11 +156,17 @@ union_request(uint64_t vid1, uint64_t vid2) {
 #else
 
 void UnionFindLib::anchor_send(int chare_index, anchorData data) {
+    //send data during boss finding, with or without aggregation based on compilation flag
+    //get location manager of this proxy
+    CkArray *arr = thisProxy.ckLocalBranch();
+    CkArrayIndex idx(chare_index);
+    //get the pe of the chare to send to from the location manager
+    int pe = arr->lastKnown(idx);
     //send data during anchoring, with or without aggregation based on compilation flag
     #ifndef AGGREGATION
     this->thisProxy[chare_index].insertDataAnchor(data);
     #else
-    tram->insertValue(data, chare_index);
+    tram->insertValue(data, pe);
     #endif
 }
 
