@@ -111,10 +111,20 @@ void UnionFindLib::boss_send(int chare_index, findBossData data) {
     CkArrayIndex idx(chare_index);
     //get the pe of the chare to send to from the location manager
     int pe = arr->lastKnown(idx);
+    
+    // If location is not cached, lastKnown falls back to homePe
+    // But if we still get -1, explicitly use homePe and request location update
+    if (pe == -1) {
+        pe = arr->homePe(idx);
+        // Request location update for future messages
+        arr->getLocMgr()->requestLocation(idx);
+    }
+    
     //send message to the chare
     #ifndef AGGREGATION
     this->thisProxy[chare_index].insertDataFindBoss(data);
     #else
+    data.targetChareIdx = chare_index;
     tram->insertValue(data, pe);
     #endif
 }
@@ -162,10 +172,20 @@ void UnionFindLib::anchor_send(int chare_index, anchorData data) {
     CkArrayIndex idx(chare_index);
     //get the pe of the chare to send to from the location manager
     int pe = arr->lastKnown(idx);
+    
+    // If location is not cached, lastKnown falls back to homePe
+    // But if we still get -1, explicitly use homePe and request location update
+    if (pe == -1) {
+        pe = arr->homePe(idx);
+        // Request location update for future messages
+        arr->getLocMgr()->requestLocation(idx);
+    }
+    
     //send data during anchoring, with or without aggregation based on compilation flag
     #ifndef AGGREGATION
     this->thisProxy[chare_index].insertDataAnchor(data);
     #else
+    data.targetChareIdx = chare_index;
     tram->insertValue(data, pe);
     #endif
 }

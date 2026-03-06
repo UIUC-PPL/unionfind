@@ -11,6 +11,7 @@ using tram_proxy_t = CProxy_HTram;
 using tram_t = HTram;
 
 extern tram_proxy_t tram_proxy;
+/*readonly*/ extern CProxy_UnionFindLib _UfLibProxy;
 
 struct unionFindVertex {
     uint64_t vertexID;
@@ -78,7 +79,8 @@ class UnionFindLib : public CBase_UnionFindLib {
     void initialize_vertices(unionFindVertex *appVertices, int numVertices);
 #ifndef ANCHOR_ALGO
     static void insertDataCaller(void *p, findBossData data) {
-        UnionFindLib *lib = (UnionFindLib *)p;
+        UnionFindLib *lib = _UfLibProxy[data.targetChareIdx].ckLocal();
+        CkAssert(lib != nullptr);
         lib->insertDataFindBoss(data);
     }
     void boss_send(int chare_index, findBossData data); //sends during boss finding, with or without aggregation
@@ -87,7 +89,8 @@ class UnionFindLib : public CBase_UnionFindLib {
     void find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID);
 #else
     static void insertDataCaller(void *p, anchorData data) {
-        UnionFindLib *lib = (UnionFindLib *)p;
+        UnionFindLib *lib = _UfLibProxy[data.targetChareIdx].ckLocal();
+        CkAssert(lib != nullptr);
         lib->insertDataAnchor(data);
     }
     void anchor_send(int chare_index, anchorData data); //sends during anchoring, with or without aggregation
