@@ -889,14 +889,18 @@ unionFindInit(CkArrayID clientArray, int n) {
     CkArrayOptions opts(n);
     opts.bindTo(clientArray);
     //tram init
+    #ifdef AGGREGATION
     nodeGrpProxy = CProxy_HTramRecv::ckNew();
     srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
     CkCallback ignore_cb(CkCallback::ignore);
     //note buffer size: not used in smp
     tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), 1024, false, static_cast<double>(0.01)/1000, true, true, ignore_cb);
+    #endif
     _UfLibProxy = CProxy_UnionFindLib::ckNew(opts, NULL);
 
+    #ifdef AGGREGATION
     _UfLibProxy.set_tram_proxy(tram_proxy);
+    #endif
     // create prefix library array here, prefix library is used in Phase 1B
     // Binding order: prefix -> unionFind -> app array
     CkArrayOptions prefix_opts(n);
