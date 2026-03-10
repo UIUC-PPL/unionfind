@@ -105,6 +105,7 @@ initialize_vertices(unionFindVertex *appVertices, int numVertices) {
 #ifndef ANCHOR_ALGO
 
 void UnionFindLib::boss_send(int chare_index, findBossData data) {
+    #ifdef AGGREGATION
     //send data during boss finding, with or without aggregation based on compilation flag
     //get location manager of this proxy
     CkArray *arr = thisProxy.ckLocalBranch();
@@ -119,6 +120,7 @@ void UnionFindLib::boss_send(int chare_index, findBossData data) {
         // Request location update for future messages
         arr->getLocMgr()->requestLocation(idx);
     }
+    #endif
     
     //send message to the chare
     #ifndef AGGREGATION
@@ -166,6 +168,7 @@ union_request(uint64_t vid1, uint64_t vid2) {
 #else
 
 void UnionFindLib::anchor_send(int chare_index, anchorData data) {
+    #ifdef AGGREGATION
     //send data during boss finding, with or without aggregation based on compilation flag
     //get location manager of this proxy
     CkArray *arr = thisProxy.ckLocalBranch();
@@ -180,6 +183,7 @@ void UnionFindLib::anchor_send(int chare_index, anchorData data) {
         // Request location update for future messages
         arr->getLocMgr()->requestLocation(idx);
     }
+    #endif
     
     //send data during anchoring, with or without aggregation based on compilation flag
     #ifndef AGGREGATION
