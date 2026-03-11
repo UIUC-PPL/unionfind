@@ -107,18 +107,20 @@ initialize_vertices(unionFindVertex *appVertices, int numVertices) {
 void UnionFindLib::boss_send(int chare_index, findBossData data) {
     #ifdef AGGREGATION
     //send data during boss finding, with or without aggregation based on compilation flag
-    //get location manager of this proxy
-    CkArray *arr = thisProxy.ckLocalBranch();
-    CkArrayIndex idx(chare_index);
-    //get the pe of the chare to send to from the location manager
-    int pe = arr->lastKnown(idx);
-    
-    // If location is not cached, lastKnown falls back to homePe
-    // But if we still get -1, explicitly use homePe and request location update
-    if (pe == -1) {
-        pe = arr->homePe(idx);
-        // Request location update for future messages
+    int pe;
+    // Check local first: avoids using a stale lastKnown cache entry if the
+    // element has migrated to this PE since the cache was last updated.
+    if (_UfLibProxy[chare_index].ckLocal() != nullptr) {
+        pe = CkMyPe();
+    } else {
+        CkArray *arr = thisProxy.ckLocalBranch();
+        CkArrayIndex idx(chare_index);
+        pe = arr->lastKnown(idx);
+        // Always request a location update so the cache stays fresh
         arr->getLocMgr()->requestLocation(idx);
+        if (pe == -1) {
+            pe = arr->homePe(idx);
+        }
     }
     #endif
     
@@ -169,19 +171,20 @@ union_request(uint64_t vid1, uint64_t vid2) {
 
 void UnionFindLib::anchor_send(int chare_index, anchorData data) {
     #ifdef AGGREGATION
-    //send data during boss finding, with or without aggregation based on compilation flag
-    //get location manager of this proxy
-    CkArray *arr = thisProxy.ckLocalBranch();
-    CkArrayIndex idx(chare_index);
-    //get the pe of the chare to send to from the location manager
-    int pe = arr->lastKnown(idx);
-    
-    // If location is not cached, lastKnown falls back to homePe
-    // But if we still get -1, explicitly use homePe and request location update
-    if (pe == -1) {
-        pe = arr->homePe(idx);
-        // Request location update for future messages
+    int pe;
+    // Check local first: avoids using a stale lastKnown cache entry if the
+    // element has migrated to this PE since the cache was last updated.
+    if (_UfLibProxy[chare_index].ckLocal() != nullptr) {
+        pe = CkMyPe();
+    } else {
+        CkArray *arr = thisProxy.ckLocalBranch();
+        CkArrayIndex idx(chare_index);
+        pe = arr->lastKnown(idx);
+        // Always request a location update so the cache stays fresh
         arr->getLocMgr()->requestLocation(idx);
+        if (pe == -1) {
+            pe = arr->homePe(idx);
+        }
     }
     #endif
     
@@ -863,6 +866,13 @@ done_profiling(int total_count) {
         CkPrintf("Phase 1 profiling done. Total number of messages is : %d\n", total_count);
         CkExit();
     }
+}
+
+void UnionFindLib::flush_buffers() {
+#ifdef AGGREGATION
+    myTramProxy.flush_everything();
+#endif
+    // no-op when not compiled with AGGREGATION
 }
 
 /**

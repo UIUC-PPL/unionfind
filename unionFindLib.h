@@ -71,6 +71,16 @@ class UnionFindLib : public CBase_UnionFindLib {
     public:
     UnionFindLib() {}
     UnionFindLib(CkMigrateMessage *m) { }
+    void pup(PUP::er &p) {
+        CBase_UnionFindLib::pup(p);
+        p | myTramProxy;
+    }
+    void ckJustMigrated() {
+#ifdef AGGREGATION
+        tram = myTramProxy.ckLocalBranch();
+#endif
+        CBase_UnionFindLib::ckJustMigrated();
+    }
     void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla);
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
     void set_tram_proxy(tram_proxy_t proxy);
@@ -80,8 +90,10 @@ class UnionFindLib : public CBase_UnionFindLib {
 #ifndef ANCHOR_ALGO
     static void insertDataCaller(void *p, findBossData data) {
         UnionFindLib *lib = _UfLibProxy[data.targetChareIdx].ckLocal();
-        CkAssert(lib != nullptr);
-        lib->insertDataFindBoss(data);
+         if (lib != nullptr)
+            lib->insertDataFindBoss(data);
+        else //this fallback will undo aggregation and do a send
+            _UfLibProxy[data.targetChareIdx].insertDataFindBoss(data);
     }
     void boss_send(int chare_index, findBossData data); //sends during boss finding, with or without aggregation
     void union_request(uint64_t vid1, uint64_t vid2);
@@ -90,13 +102,17 @@ class UnionFindLib : public CBase_UnionFindLib {
 #else
     static void insertDataCaller(void *p, anchorData data) {
         UnionFindLib *lib = _UfLibProxy[data.targetChareIdx].ckLocal();
-        CkAssert(lib != nullptr);
-        lib->insertDataAnchor(data);
+        if (lib != nullptr) {
+            lib->insertDataAnchor(data);
+        } else {
+            _UfLibProxy[data.targetChareIdx].insertDataAnchor(data);
+        }
     }
     void anchor_send(int chare_index, anchorData data); //sends during anchoring, with or without aggregation
     void union_request(uint64_t v, uint64_t w);
     void anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx);
 #endif
+    void flush_buffers();
     void local_path_compression(unionFindVertex *src, uint64_t compressedParent);
     bool check_same_chares(uint64_t v1, uint64_t v2);
     void short_circuit_parent(shortCircuitData scd);
