@@ -48,6 +48,7 @@ module unionFindLib {
 
         // flush aggregation buffers
         entry void flush_buffers();
+        entry void quiesce(CkCallback cb);
 
         // TRAM functions
         entry void insertDataFindBoss(const findBossData & data);

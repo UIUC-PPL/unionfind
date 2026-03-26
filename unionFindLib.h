@@ -113,6 +113,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     void anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx);
 #endif
     void flush_buffers();
+    void quiesce(CkCallback cb);
     void local_path_compression(unionFindVertex *src, uint64_t compressedParent);
     bool check_same_chares(uint64_t v1, uint64_t v2);
     void short_circuit_parent(shortCircuitData scd);

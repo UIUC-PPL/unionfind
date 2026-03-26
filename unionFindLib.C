@@ -116,14 +116,14 @@ void UnionFindLib::boss_send(int chare_index, findBossData data) {
         CkArray *arr = thisProxy.ckLocalBranch();
         CkArrayIndex idx(chare_index);
         pe = arr->lastKnown(idx);
-        // Always request a location update so the cache stays fresh
-        arr->getLocMgr()->requestLocation(idx);
         if (pe == -1) {
+            CkAbort("Location not found\n");
             pe = arr->homePe(idx);
+            arr->getLocMgr()->requestLocation(idx);
         }
     }
     #endif
-    
+
     //send message to the chare
     #ifndef AGGREGATION
     this->thisProxy[chare_index].insertDataFindBoss(data);
@@ -180,14 +180,13 @@ void UnionFindLib::anchor_send(int chare_index, anchorData data) {
         CkArray *arr = thisProxy.ckLocalBranch();
         CkArrayIndex idx(chare_index);
         pe = arr->lastKnown(idx);
-        // Always request a location update so the cache stays fresh
-        arr->getLocMgr()->requestLocation(idx);
         if (pe == -1) {
             pe = arr->homePe(idx);
+            arr->getLocMgr()->requestLocation(idx);
         }
     }
     #endif
-    
+
     //send data during anchoring, with or without aggregation based on compilation flag
     #ifndef AGGREGATION
     this->thisProxy[chare_index].insertDataAnchor(data);
@@ -297,6 +296,7 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
         //remote message to continue boss1 find
         boss_send(parent_loc.first, d);
 
+        /*
         // check if sender and current vertex are on different chares
         if (senderID != -1 && !check_same_chares(senderID, curr->vertexID)) {
             // short circuit the sender to point to grandparent
@@ -307,6 +307,7 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
             //send to path compress across chares
             thisProxy[sender_loc.first].short_circuit_parent(scd);
         }
+            */
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         libGroup.ckLocalBranch()->increase_message_count();
@@ -384,6 +385,7 @@ find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
         //remote message to continue boss2 find
         boss_send(parent_loc.first, d);
 
+        /*
         // check if sender and current vertex are on different chares
         if (senderID != -1 && !check_same_chares(senderID, curr->vertexID)) {
             // short circuit the sender to point to grandparent
@@ -395,6 +397,7 @@ find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
             //send to path compress across chares
             thisProxy[sender_loc.first].short_circuit_parent(scd);
         }
+            */
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         libGroup.ckLocalBranch()->increase_message_count();
@@ -873,6 +876,14 @@ void UnionFindLib::flush_buffers() {
     myTramProxy.flush_everything();
 #endif
     // no-op when not compiled with AGGREGATION
+}
+
+void UnionFindLib::quiesce(CkCallback cb) {
+#ifdef AGGREGATION
+    myTramProxy[0].htramQuiesce(cb);
+#else
+    cb.send();
+#endif
 }
 
 /**
