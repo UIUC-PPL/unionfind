@@ -139,33 +139,40 @@ union_request(uint64_t vid1, uint64_t vid2) {
     if (vid2 < vid1) {
         // found a back edge, flip and reprocess
         union_request(vid2, vid1);
+        return;
     }
-    else {
-        std::pair<int, int> vid1_loc = getLocationFromID(vid1);
 
-        //message the chare containing first vertex to find boss1
-        //pass the initilizer ID for initiating path compression
+    std::pair<int, int> vid1_loc = getLocationFromID(vid1);
+    std::pair<int, int> vid2_loc = getLocationFromID(vid2);
 
-        findBossData d;
-        d.arrIdx = vid1_loc.second;
-        d.partnerOrBossID = vid2;
-        d.senderID = -1;
-        d.isFBOne = 1;
-        if(vid1_loc.first == this->thisIndex)
-        {
-            this->insertDataFindBoss(d);
-        }
-        else
-        {
-            //remote message to start boss1 find
-            boss_send(vid1_loc.first, d);
-        }
-
-
-        //for profiling
+    // Fast path: both vertices are on this chare — skip the find_boss protocol
+    // entirely and do a local sequential union with full path compression.
+    if (vid1_loc.first == this->thisIndex && vid2_loc.first == this->thisIndex) {
+        local_union(vid1, vid2);
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         libGroup.ckLocalBranch()->increase_message_count();
+        return;
     }
+
+    //message the chare containing first vertex to find boss1
+    findBossData d;
+    d.arrIdx = vid1_loc.second;
+    d.partnerOrBossID = vid2;
+    d.senderID = -1;
+    d.isFBOne = 1;
+    if(vid1_loc.first == this->thisIndex)
+    {
+        this->insertDataFindBoss(d);
+    }
+    else
+    {
+        //remote message to start boss1 find
+        boss_send(vid1_loc.first, d);
+    }
+
+    //for profiling
+    CProxy_UnionFindLibGroup libGroup(libGroupID);
+    libGroup.ckLocalBranch()->increase_message_count();
 }
 #else
 
@@ -492,7 +499,76 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
 }
 #endif
 
-// perform local path compression
+// Fast path for union requests where both vertices are on this chare.
+// Walks each vertex's parent chain, stopping at the actual root (parent == -1)
+// OR at the last local node before the chain crosses to a remote chare.
+// Returns the local tip and sets *is_actual_root to indicate which case occurred.
+// Compresses all traversed local nodes to point directly to the local tip.
+void UnionFindLib::
+local_union(uint64_t vid1, uint64_t vid2) {
+    auto arrIdx = [](uint64_t vid) -> int { return (int)(vid & 0xFFFFFFFF); };
+    auto chareOf = [](uint64_t vid) -> int { return (int)(vid >> 32); };
+
+    // Walk parent chain staying within this chare.
+    // Returns the local tip (either the actual root if parent==-1, or the last
+    // local node before the chain goes remote).  Compresses the traversed path
+    // to point directly to that tip.  *crossed_boundary is set to true if we
+    // stopped because the next parent is on a different chare.
+    auto find_local_tip = [&](uint64_t start, bool &crossed_boundary) -> uint64_t {
+        uint64_t curr = start;
+        while (true) {
+            int64_t par = myVertices[arrIdx(curr)].parent;
+            if (par == -1) {
+                // curr is the actual root of its component (locally)
+                crossed_boundary = false;
+                break;
+            }
+            uint64_t par_vid = (uint64_t)par;
+            if (chareOf(par_vid) != thisIndex) {
+                // next step leaves this chare — curr is the local tip
+                crossed_boundary = true;
+                break;
+            }
+            curr = par_vid;
+        }
+        uint64_t tip = curr;
+        // Compress: point every node on the path directly to tip
+        curr = start;
+        while (curr != tip) {
+            int64_t next = myVertices[arrIdx(curr)].parent;
+            myVertices[arrIdx(curr)].parent = (int64_t)tip;
+            curr = (uint64_t)next;
+        }
+        return tip;
+    };
+
+    bool crossed1, crossed2;
+    uint64_t tip1 = find_local_tip(vid1, crossed1);
+    uint64_t tip2 = find_local_tip(vid2, crossed2);
+
+    // If either path left this chare, we can't resolve the actual boss locally.
+    // Call insertDataFindBoss directly from the local tips to avoid re-triggering
+    // the local_union fast path (which would cause infinite recursion).
+    if (crossed1 || crossed2) {
+        if (tip1 == tip2) return;
+        if (tip2 < tip1) std::swap(tip1, tip2);
+        findBossData d;
+        d.arrIdx = (int)(tip1 & 0xFFFFFFFF);
+        d.partnerOrBossID = tip2;
+        d.senderID = -1;
+        d.isFBOne = 1;
+        this->insertDataFindBoss(d);
+        return;
+    }
+
+    // Both paths ended at actual roots on this chare — merge directly.
+    if (tip1 == tip2) return; // already same component
+    if (tip1 < tip2)
+        myVertices[arrIdx(tip2)].parent = (int64_t)tip1;
+    else
+        myVertices[arrIdx(tip1)].parent = (int64_t)tip2;
+}
+
 void UnionFindLib::
 local_path_compression(unionFindVertex *src, uint64_t compressedParent) {
     unionFindVertex* tmp;

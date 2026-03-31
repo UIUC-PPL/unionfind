@@ -114,6 +114,7 @@ class UnionFindLib : public CBase_UnionFindLib {
 #endif
     void flush_buffers();
     void quiesce(CkCallback cb);
+    void local_union(uint64_t vid1, uint64_t vid2);
     void local_path_compression(unionFindVertex *src, uint64_t compressedParent);
     bool check_same_chares(uint64_t v1, uint64_t v2);
     void short_circuit_parent(shortCircuitData scd);
