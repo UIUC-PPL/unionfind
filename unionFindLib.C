@@ -883,7 +883,7 @@ perform_pruning() {
     }
 
     if (thisIndex == 0) {
-        CkPrintf("Number of components found: %d\n", totalNumBosses);
+        //CkPrintf("Number of components found: %d\n", totalNumBosses);
         int numPrunedComponents = 0;
         for (int i = 0; i < totalNumBosses; i++) {
             int compCount = libGroup.ckLocalBranch()->get_component_count(i);
@@ -891,7 +891,7 @@ perform_pruning() {
                 numPrunedComponents++;
             }
         }
-        //CkPrintf("Number of components after pruning: %d\n", totalNumBosses-numPrunedComponents);
+        CkPrintf("Number of components after pruning: %d\n", totalNumBosses-numPrunedComponents);
     }
 
 #ifdef PROFILING
