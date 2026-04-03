@@ -336,6 +336,13 @@ find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
         else {
             //valid edge
             if (boss1ID != src->vertexID) {//avoid self-loop
+                // propagate size to new root before setting parent
+                std::pair<int,int> boss1_loc = getLocationFromID(boss1ID);
+                if (boss1_loc.first == thisIndex) {
+                    add_size(boss1_loc.second, src->size);
+                } else {
+                    thisProxy[boss1_loc.first].add_size(boss1_loc.second, src->size);
+                }
                 src->parent = boss1ID;
                 //message initID to start path compression in boss2's chain
                 /*std::pair<int,int> init_loc = appPtr->getLocationFromID(initID);
@@ -461,6 +468,13 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
         // Make all nodes point to this parent v
         local_path_compression(path_base, v);
       }
+      // propagate size to new root before setting parent
+      std::pair<int,int> v_loc_size = getLocationFromID(v);
+      if (v_loc_size.first == thisIndex) {
+          add_size(v_loc_size.second, w->size);
+      } else {
+          thisProxy[v_loc_size.first].add_size(v_loc_size.second, w->size);
+      }
       w->parent = v; //anchor algo guarantees that v will be smaller here
     }
     //correct order (w is larger) and not at the root
@@ -563,10 +577,13 @@ local_union(uint64_t vid1, uint64_t vid2) {
 
     // Both paths ended at actual roots on this chare — merge directly.
     if (tip1 == tip2) return; // already same component
-    if (tip1 < tip2)
+    if (tip1 < tip2) {
+        myVertices[arrIdx(tip1)].size += myVertices[arrIdx(tip2)].size;
         myVertices[arrIdx(tip2)].parent = (int64_t)tip1;
-    else
+    } else {
+        myVertices[arrIdx(tip2)].size += myVertices[arrIdx(tip1)].size;
         myVertices[arrIdx(tip1)].parent = (int64_t)tip2;
+    }
 }
 
 void UnionFindLib::
@@ -611,6 +628,30 @@ compress_path(int arrIdx, uint64_t compressedParent) {
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         libGroup.ckLocalBranch()->increase_message_count();
         src->parent = compressedParent;
+    }
+}
+
+// Adds delta to the size of the root reachable from arrIdx.
+// If this vertex is no longer a root (it was merged), forwards to current parent
+// so that no size contribution is lost regardless of message ordering.
+void UnionFindLib::
+add_size(int arrIdx, int64_t delta) {
+#ifndef ANCHOR_ALGO
+    bool is_root = (myVertices[arrIdx].parent == -1);
+#else
+    // Match existing root checks (e.g. line 641): use unsigned promotion so
+    // high-bit vertex IDs compare correctly against int64_t parent.
+    bool is_root = ((uint64_t)myVertices[arrIdx].parent == myVertices[arrIdx].vertexID);
+#endif
+    if (is_root) {
+        myVertices[arrIdx].size += delta;
+    } else {
+        std::pair<int,int> par_loc = getLocationFromID((uint64_t)myVertices[arrIdx].parent);
+        if (par_loc.first == thisIndex) {
+            add_size(par_loc.second, delta);
+        } else {
+            thisProxy[par_loc.first].add_size(par_loc.second, delta);
+        }
     }
 }
 
@@ -693,7 +734,7 @@ start_component_labeling() {
 #endif
             // one of the bosses/root found
             CkAssert(v->componentNumber != -1); // phase 2a assigned serial numbers
-            set_component(i, v->componentNumber);
+            set_component(i, v->componentNumber, v->size);
         }
 
         if (v->componentNumber == -1) {
@@ -705,11 +746,11 @@ start_component_labeling() {
                 if(parentCache[v->parent].compNum != -1)
                 {
                     //call set component on myself
-                    set_component(i, parentCache[v->parent].compNum);
+                    set_component(i, parentCache[v->parent].compNum, parentCache[v->parent].compSize);
                     //then loop over and call set component on the waiting requests (should only run once per cache entry)
                     for(int j=0; j<parentCache[v->parent].requestors.size(); j++)
                     {
-                        set_component(parentCache[v->parent].requestors[j], parentCache[v->parent].compNum);
+                        set_component(parentCache[v->parent].requestors[j], parentCache[v->parent].compNum, parentCache[v->parent].compSize);
                     }
                     parentCache[v->parent].requestors.clear();
                 }
@@ -780,9 +821,9 @@ need_boss(int arrIdx, uint64_t fromID) {
         // component already set, reply back
         std::pair<int, int> requestor_loc = getLocationFromID(fromID);
         if (requestor_loc.first == thisIndex) {
-            set_component(requestor_loc.second, myVertices[arrIdx].componentNumber);
+            set_component(requestor_loc.second, myVertices[arrIdx].componentNumber, myVertices[arrIdx].componentSize);
         } else {
-            this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, myVertices[arrIdx].componentNumber);
+            this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, myVertices[arrIdx].componentNumber, myVertices[arrIdx].componentSize);
         }
     }
     else {
@@ -792,8 +833,9 @@ need_boss(int arrIdx, uint64_t fromID) {
 }
 
 void UnionFindLib::
-set_component(int arrIdx, long int compNum) {
+set_component(int arrIdx, long int compNum, int64_t compSize) {
     myVertices[arrIdx].componentNumber = compNum;
+    myVertices[arrIdx].componentSize = compSize;
     std::pair<int, int> parent_loc = getLocationFromID(myVertices[arrIdx].parent);
     if(parent_loc.first != thisIndex)
     {
@@ -802,11 +844,12 @@ set_component(int arrIdx, long int compNum) {
         if(parentCache.count(my_parent)!=0)
         {
             parentCache[my_parent].compNum = compNum;
+            parentCache[my_parent].compSize = compSize;
             for(int j=0; j<parentCache[my_parent].requestors.size(); j++)
             {
-                set_component(parentCache[my_parent].requestors[j], compNum);
+                set_component(parentCache[my_parent].requestors[j], compNum, compSize);
             }
-            
+
         }
     }
 
@@ -816,9 +859,9 @@ set_component(int arrIdx, long int compNum) {
         uint64_t requestorID = (need_boss_queue).back();
         std::pair<int, int> requestor_loc = getLocationFromID(requestorID);
         if (requestor_loc.first == thisIndex) {
-            set_component(requestor_loc.second, compNum);
+            set_component(requestor_loc.second, compNum, compSize);
         } else {
-            this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, compNum);
+            this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, compNum, compSize);
         }
         // done with current requestor, delete from request queue
         need_boss_queue.pop_back();
@@ -836,34 +879,48 @@ set_component(int arrIdx, long int compNum) {
 void UnionFindLib::
 prune_components(int threshold, CkCallback appReturnCb) {
     componentPruneThreshold = threshold;
+    postPruningCb = appReturnCb;
 
-    //int *localCounts = new int[totalNumBosses]();
-    std::vector<int> localCounts(totalNumBosses, 0);
-    //if (localCounts == NULL) {
-    //    CkAbort("We are out of memory!");
-    //}
-
+    int localSurviving = 0;
+    long bucket[64] = {0}; // for component size distribution, can be removed later
     for (int i = 0; i < numMyVertices; i++) {
-        long int bossID = myVertices[i].componentNumber;
-        //if(!(bossID >= 0 && bossID < totalNumBosses)) CkPrintf("Total bosses: %d, bossID: %ld\n", totalNumBosses, bossID);
-        CkAssert(bossID >= 0 && bossID < totalNumBosses);
-        localCounts[bossID]++;
+        if (myVertices[i].componentSize <= threshold) {
+            myVertices[i].componentNumber = -1;
+        } else {
+            // count surviving bosses to get total component count
+#ifndef ANCHOR_ALGO
+            //if (myVertices[i].parent == -1) localSurviving++;
+            if (myVertices[i].parent == -1)
+            {
+                bucket[(int) log(myVertices[i].componentSize)]++;
+                localSurviving++;
+            }
+#else
+            if (myVertices[i].parent == (int64_t)myVertices[i].vertexID) localSurviving++;
+#endif
+        }
     }
 
-    //CkPrintf("[TP %d] localCounts constructed\n", thisIndex);
 
-    // bcast totalCounts to all group chares
-    CProxy_UnionFindLibGroup libGroupProxy(libGroupID);
-    CkCallback cb(CkReductionTarget(UnionFindLibGroup, build_component_count_array), libGroupProxy);
-    //contribute(sizeof(int)*totalNumBosses, localCounts, CkReduction::sum_int, cb);
-    contribute(localCounts, CkReduction::sum_int, cb);
+    // pack surviving count + bucket distribution into one array for a single reduction
+    long reductionData[65] = {0};
+    reductionData[0] = localSurviving;
+    for (int b = 0; b < 64; b++) reductionData[b + 1] = bucket[b];
 
-    //delete[] localCounts;
+    CkCallback cb(CkReductionTarget(UnionFindLib, report_surviving_components), thisProxy[0]);
+    contribute(sizeof(long) * 65, reductionData, CkReduction::sum_long, cb);
+}
 
-    // start QD to return back to application
-    if (thisIndex == 0) {
-        CkStartQD(appReturnCb);
+void UnionFindLib::
+report_surviving_components(long *totalData, int numElems) {
+    CkAssert(thisIndex == 0);
+    CkPrintf("Number of components after pruning: %ld\n", totalData[0]);
+    CkPrintf("Component size distribution:\n");
+    for (int b = 0; b < 64; b++) {
+        if (totalData[b + 1] > 0)
+            CkPrintf("  bucket[%d]: %ld components\n", b, totalData[b + 1]);
     }
+    CkStartQD(postPruningCb);
 }
 
 // reductiontarget from group => all component count arrays are ready

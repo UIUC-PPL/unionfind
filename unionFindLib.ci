@@ -38,11 +38,13 @@ module unionFindLib {
         entry void find_components(CkCallback cb);
         entry [reductiontarget] void boss_count_prefix_done(int totalCount);
         entry void need_boss(int arrIdx, uint64_t fromID);
-        entry void set_component(int arrIdx, int compNum);
+        entry void add_size(int arrIdx, long delta);
+        entry void set_component(int arrIdx, int compNum, long compSize);
 
         // functions to prune out small components
         entry void prune_components(int threshold, CkCallback cb);
         entry [reductiontarget] void perform_pruning();
+        entry [reductiontarget] void report_surviving_components(long totalData[numElems], int numElems);
         //entry [reductiontarget,nokeep] void merge_count_results(CkReductionMsg *msg);
         //entry [reductiontarget] void merge_count_results(int totalCounts[numElems], int numElems);
 

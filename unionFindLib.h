@@ -17,6 +17,8 @@ struct unionFindVertex {
     uint64_t vertexID;
     int64_t parent;
     long int componentNumber = -1;
+    int64_t componentSize = -1;
+    int64_t size = 1;
     std::vector<uint64_t> need_boss_requests; //request queue for processing need_boss requests
     long int findOrAnchorCount = 0;
 
@@ -24,6 +26,8 @@ struct unionFindVertex {
         p|vertexID;
         p|parent;
         p|componentNumber;
+        p|componentSize;
+        p|size;
         p|need_boss_requests;
     }
 };
@@ -40,10 +44,12 @@ struct componentCountMap {
 
 typedef struct componentCacheEntry {
     long int compNum;
+    int64_t compSize = -1;
     std::vector<long int> requestors;
 
     void pup(PUP::er &p) {
         p|compNum;
+        p|compSize;
         p|requestors;
     }
 } cacheEntry;
@@ -64,6 +70,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     int myLocalNumBosses;
     int totalNumBosses;
     CkCallback postComponentLabelingCb;
+    CkCallback postPruningCb;
     std::unordered_map<long int, cacheEntry> parentCache; //maps vertex numbers to component numbers
     tram_t* tram;
     tram_proxy_t myTramProxy;
@@ -133,9 +140,11 @@ class UnionFindLib : public CBase_UnionFindLib {
     void insertDataAnchor(const anchorData & data);
 #endif
     void need_boss(int arrIdx, uint64_t fromID);
-    void set_component(int arrIdx, long int compNum);
+    void add_size(int arrIdx, int64_t delta);
+    void set_component(int arrIdx, long int compNum, int64_t compSize);
     void prune_components(int threshold, CkCallback appReturnCb);
     void perform_pruning();
+    void report_surviving_components(long *totalData, int numElems);
     int get_total_num_bosses() {
         return totalNumBosses;
     }
