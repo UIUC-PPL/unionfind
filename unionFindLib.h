@@ -94,6 +94,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     void registerGetLocationFromID(std::pair<int, int> (*gloc)(uint64_t vid));
     void register_phase_one_cb(CkCallback cb);
     void initialize_vertices(unionFindVertex *appVertices, int numVertices);
+    uint64_t get_parent(uint64_t vertexID);
 #ifndef ANCHOR_ALGO
     static void insertDataCaller(void *p, findBossData data) {
         UnionFindLib *lib = _UfLibProxy[data.targetChareIdx].ckLocal();

@@ -95,6 +95,19 @@ initialize_vertices(unionFindVertex *appVertices, int numVertices) {
 }
 
 /**
+ * @brief gets the parent of a vertex given its vertexID
+ */
+
+uint64_t UnionFindLib::get_parent(uint64_t vertexID) {
+    std::pair<int, int> loc = getLocationFromID(vertexID);
+    if (loc.first != this->thisIndex) {
+        CkAbort("[UnionFindLib] get_parent called with vertexID that does not belong to this chare!");
+    }
+    return myVertices[loc.second].parent;
+}
+
+
+/**
  * @brief performs a union on two vertices given their vertexIDs
  * 
  * assumes the vertexIDs encode the information about the location of the vertex
