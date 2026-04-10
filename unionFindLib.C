@@ -163,7 +163,9 @@ union_request(uint64_t vid1, uint64_t vid2) {
     if (vid1_loc.first == this->thisIndex && vid2_loc.first == this->thisIndex) {
         local_union(vid1, vid2);
         CProxy_UnionFindLibGroup libGroup(libGroupID);
+        #ifdef PROFILING
         libGroup.ckLocalBranch()->increase_message_count();
+        #endif
         return;
     }
 
@@ -185,7 +187,9 @@ union_request(uint64_t vid1, uint64_t vid2) {
 
     //for profiling
     CProxy_UnionFindLibGroup libGroup(libGroupID);
+    #ifdef PROFILING
     libGroup.ckLocalBranch()->increase_message_count();
+    #endif
 }
 #else
 
@@ -257,7 +261,9 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
         
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
+        #ifdef PROFILING
         libGroup.ckLocalBranch()->increase_message_count();
+        #endif
         //message the initID to kick off path compression in boss1's chain
         /*std::pair<int,int> init_loc = appPtr->getLocationFromID(initID);
         this->thisProxy[init_loc.first].compress_path(init_loc.second, src->vertexID);
@@ -330,7 +336,9 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
             */
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
+        #ifdef PROFILING
         libGroup.ckLocalBranch()->increase_message_count();
+        #endif
     }
 }
 
@@ -427,7 +435,9 @@ find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
             */
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
+        #ifdef PROFILING
         libGroup.ckLocalBranch()->increase_message_count();
+        #endif
     }
 }
 #else
