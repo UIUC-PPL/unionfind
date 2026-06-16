@@ -16,6 +16,7 @@ extern tram_proxy_t tram_proxy;
 struct unionFindVertex {
     uint64_t vertexID;
     int64_t parent;
+    int64_t process_tip; //used during path compression to store the last node local vertex on the path to the root
     long int componentNumber = -1;
     int64_t componentSize = -1;
     int64_t size = 1;
@@ -25,6 +26,7 @@ struct unionFindVertex {
     void pup(PUP::er &p) {
         p|vertexID;
         p|parent;
+        p|process_tip;
         p|componentNumber;
         p|componentSize;
         p|size;
