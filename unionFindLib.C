@@ -863,7 +863,7 @@ set_component(int arrIdx, long int compNum, int64_t compSize) {
     if(parent_loc.first != thisIndex)
     {
         //if the parent cache entry exists (it should by this point)
-        int my_parent = myVertices[arrIdx].parent;
+        int64_t my_parent = myVertices[arrIdx].parent;
         if(parentCache.count(my_parent)!=0)
         {
             parentCache[my_parent].compNum = compNum;
