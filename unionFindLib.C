@@ -231,6 +231,14 @@ union_request(uint64_t v, uint64_t w) {
 }
 #endif
 
+// Client-facing API addition: batched union requests (one marshalled message
+// per submitting PE instead of one entry invocation per edge). Outside the
+// ANCHOR_ALGO guard: both algo variants provide a two-arg union_request.
+void UnionFindLib::
+union_requests(const std::vector<UFEdge>& edges) {
+    for (const auto& e : edges) union_request(e.a, e.b);
+}
+
 #ifndef ANCHOR_ALGO
 void UnionFindLib::
 find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
@@ -1102,7 +1110,9 @@ unionFindInit(CkArrayID clientArray, int n) {
 
     libGroupID = CProxy_UnionFindLibGroup::ckNew();
 
-    _UfLibProxy.passLibGroupID(libGroupID, prefixLibArray);
+    // unionFindInit does not order against a ready callback; the elements
+    // contribute to an ignored callback (see passLibGroupID's `ready`).
+    _UfLibProxy.passLibGroupID(libGroupID, prefixLibArray, CkCallback(CkCallback::ignore));
 
     #ifdef AGGREGATION
     // print aggregation option
@@ -1114,11 +1124,65 @@ unionFindInit(CkArrayID clientArray, int n) {
     return _UfLibProxy;
 }
 
-void UnionFindLib::passLibGroupID(CkGroupID lgid, CProxy_Prefix pla)
+/**
+ * Client-facing API addition (FoF): one library chare per PROCESS, element i
+ * placed on the first PE of node i via UFNodeMap, instead of binding to a
+ * client array. The prefix array is bound to the library array (prefix element
+ * i co-located with library element i, as find_components requires). `ready`
+ * fires once every element has executed passLibGroupID (constructed and
+ * wired); callers must wait on it before any broadcast that relies on the
+ * prefix/group proxies, since message delivery is not ordered.
+ */
+CProxy_UnionFindLib UnionFindLib::
+unionFindInitOnePerNode(const CkCallback& ready) {
+    int n = CkNumNodes();
+    CProxy_UFNodeMap node_map = CProxy_UFNodeMap::ckNew();
+    CkArrayOptions opts(n);
+    opts.setMap(node_map);
+
+    //tram init: mirror unionFindInit so the one-per-node path also works when
+    //built with aggregation (htram) enabled.
+    #ifdef AGGREGATION
+    nodeGrpProxy = CProxy_HTramRecv::ckNew();
+    srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
+    CkCallback ignore_cb(CkCallback::ignore);
+    //note buffer size: not used in smp
+    tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), 1024, false, static_cast<double>(0.01)/1000, true, true, ignore_cb);
+    #endif
+
+    CProxy_UnionFindLib lib_proxy = CProxy_UnionFindLib::ckNew(opts);
+    _UfLibProxy = lib_proxy;
+
+    #ifdef AGGREGATION
+    lib_proxy.set_tram_proxy(tram_proxy);
+    #endif
+
+    CkArrayOptions prefix_opts(n);
+    prefix_opts.bindTo(lib_proxy);
+    CProxy_Prefix pla = CProxy_Prefix::ckNew(n, prefix_opts);
+
+    CkGroupID lgid = CProxy_UnionFindLibGroup::ckNew();
+
+    lib_proxy.passLibGroupID(lgid, pla, ready);
+
+    #ifdef AGGREGATION
+    printf("UnionFindLib: Compiled with aggregation optimizations\n");
+    #else
+    printf("UnionFindLib: Compiled without aggregation optimizations\n");
+    #endif
+
+    return lib_proxy;
+}
+
+void UnionFindLib::passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CkCallback ready)
 {
     prefixLibArray = pla;
     libGroupID = lgid;
     _UfLibProxy = this->thisProxy;
+    // Client-facing API addition: contribute so callers (e.g.
+    // unionFindInitOnePerNode) can order initialization against later
+    // broadcasts. unionFindInit passes CkCallback::ignore.
+    contribute(ready);
 }
 
 #include "unionFindLib.def.h"

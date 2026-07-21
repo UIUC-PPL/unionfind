@@ -41,6 +41,14 @@ struct anchorData {
 };
 #endif
 
+// Client-facing API addition: batched union_request payload — one edge per
+// entry, submitted per PE via UnionFindLib::union_requests.
+struct UFEdge {
+    uint64_t a;
+    uint64_t b;
+    void pup(PUP::er &p) { p|a; p|b; }
+};
+
 struct shortCircuitData {
     uint64_t arrIdx;
     int64_t grandparentID;

@@ -90,8 +90,13 @@ class UnionFindLib : public CBase_UnionFindLib {
 #endif
         CBase_UnionFindLib::ckJustMigrated();
     }
-    void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla);
+    void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CkCallback ready);
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
+    // Client-facing API addition: one library chare per PROCESS, element i on
+    // the first PE of node i (UFNodeMap), instead of binding to a client
+    // array. `ready` fires (array reduction) once every element has been
+    // constructed and wired, so the caller may safely follow with broadcasts.
+    static CProxy_UnionFindLib unionFindInitOnePerNode(const CkCallback& ready);
     void set_tram_proxy(tram_proxy_t proxy);
     void registerGetLocationFromID(std::pair<int, int> (*gloc)(uint64_t vid));
     void register_phase_one_cb(CkCallback cb);
@@ -122,6 +127,10 @@ class UnionFindLib : public CBase_UnionFindLib {
     void union_request(uint64_t v, uint64_t w);
     void anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx);
 #endif
+    // client-facing API addition: batched union requests (one message per PE).
+    // Placed outside the ANCHOR_ALGO guard: both algo variants provide a
+    // two-arg union_request that this wraps.
+    void union_requests(const std::vector<UFEdge>& edges);
     void flush_buffers();
     void quiesce(CkCallback cb);
     void local_union(uint64_t vid1, uint64_t vid2);
@@ -173,6 +182,17 @@ class UnionFindLibGroup : public CBase_UnionFindLibGroup {
     void increase_message_count();
     void contribute_count();
     void done_profiling(int);
+};
+
+// Client-facing API addition: array map placing element i on the first PE of
+// (SMP) node i — the one-chare-per-process layout used by
+// unionFindInitOnePerNode.
+class UFNodeMap : public CBase_UFNodeMap {
+  public:
+    UFNodeMap() {}
+    int procNum(int, const CkArrayIndex &idx) {
+        return CkNodeFirst(idx.data()[0]);
+    }
 };
 
 
