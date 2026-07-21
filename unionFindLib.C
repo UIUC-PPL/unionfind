@@ -711,7 +711,6 @@ find_components(CkCallback cb) {
     // send local count to prefix library
     CkCallback doneCb(CkReductionTarget(UnionFindLib, boss_count_prefix_done), thisProxy);
     prefixLibArray[thisIndex].startPrefixCalculation(myLocalNumBosses, doneCb);
-    //CkPrintf("[%d] Local num bosses: %d\n", thisIndex, myLocalNumBosses);
 }
 
 // Recveive total boss count from prefix library and start labelling phase
@@ -857,37 +856,46 @@ need_boss(int arrIdx, uint64_t fromID) {
 
 void UnionFindLib::
 set_component(int arrIdx, long int compNum, int64_t compSize) {
-    myVertices[arrIdx].componentNumber = compNum;
-    myVertices[arrIdx].componentSize = compSize;
-    std::pair<int, int> parent_loc = getLocationFromID(myVertices[arrIdx].parent);
-    if(parent_loc.first != thisIndex)
-    {
-        //if the parent cache entry exists (it should by this point)
-        int my_parent = myVertices[arrIdx].parent;
-        if(parentCache.count(my_parent)!=0)
+    // Iterative propagation via an explicit work queue to avoid stack overflow
+    // from deep recursive chains when union-find trees are not fully compressed.
+    std::vector<int> work_queue;
+    work_queue.push_back(arrIdx);
+
+    while (!work_queue.empty()) {
+        int idx = work_queue.back();
+        work_queue.pop_back();
+
+        myVertices[idx].componentNumber = compNum;
+        myVertices[idx].componentSize = compSize;
+
+        // Update parentCache entry if this vertex's parent is on a different chare
+        int64_t my_parent = myVertices[idx].parent;
+        std::pair<int, int> parent_loc = getLocationFromID((uint64_t)my_parent);
+        if (parent_loc.first != thisIndex)
         {
-            parentCache[my_parent].compNum = compNum;
-            parentCache[my_parent].compSize = compSize;
-            for(int j=0; j<parentCache[my_parent].requestors.size(); j++)
+            if (parentCache.count(my_parent) != 0)
             {
-                set_component(parentCache[my_parent].requestors[j], compNum, compSize);
+                parentCache[my_parent].compNum = compNum;
+                parentCache[my_parent].compSize = compSize;
+                for (int j = 0; j < (int)parentCache[my_parent].requestors.size(); j++)
+                {
+                    work_queue.push_back(parentCache[my_parent].requestors[j]);
+                }
             }
-
         }
-    }
 
-    // since component number is set, respond to your requestors
-    std::vector<uint64_t> need_boss_queue = myVertices[arrIdx].need_boss_requests;
-    while (!need_boss_queue.empty()) {
-        uint64_t requestorID = (need_boss_queue).back();
-        std::pair<int, int> requestor_loc = getLocationFromID(requestorID);
-        if (requestor_loc.first == thisIndex) {
-            set_component(requestor_loc.second, compNum, compSize);
-        } else {
-            this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, compNum, compSize);
+        // Respond to all vertices that were waiting for this vertex's component label.
+        // Drain the actual queue (not a copy) so requests are not re-processed.
+        std::vector<uint64_t> local_requests;
+        local_requests.swap(myVertices[idx].need_boss_requests);
+        for (uint64_t requestorID : local_requests) {
+            std::pair<int, int> requestor_loc = getLocationFromID(requestorID);
+            if (requestor_loc.first == thisIndex) {
+                work_queue.push_back(requestor_loc.second);
+            } else {
+                this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, compNum, compSize);
+            }
         }
-        // done with current requestor, delete from request queue
-        need_boss_queue.pop_back();
     }
 }
 
