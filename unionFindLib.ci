@@ -14,7 +14,8 @@ module unionFindLib {
         entry UnionFindLib();
 
         
-        entry void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla);
+        // ready: contributed by every element once wired (see unionFindLib.h)
+        entry void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CkCallback ready);
 
 
         // function to register Phase 1 callback
@@ -22,6 +23,8 @@ module unionFindLib {
         entry void set_tram_proxy(CProxy_HTram proxy);
         // functions to build inverted trees
         entry void union_request(uint64_t v, uint64_t w);
+        // client-facing API addition: batched union requests (one message per PE)
+        entry void union_requests(const std::vector<UFEdge>& edges);
 #ifndef ANCHOR_ALGO
         entry void find_boss1(int arrIdx, uint64_t partnerID, uint64_t initID);
         entry void find_boss2(int arrIdx, uint64_t boss1ID, uint64_t initID);
@@ -70,5 +73,11 @@ module unionFindLib {
         entry [reductiontarget] void done_profiling(int result);
         entry void contribute_count();
 
+    }
+
+    // client-facing API addition: one-element-per-process placement for
+    // unionFindInitOnePerNode (element i on the first PE of node i)
+    group UFNodeMap : CkArrayMap {
+        entry UFNodeMap();
     }
 };
