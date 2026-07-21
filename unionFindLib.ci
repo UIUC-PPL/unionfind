@@ -1,6 +1,8 @@
 module unionFindLib {
     extern module prefixBalance;
-    extern module htram_group;
+#ifdef AGGREGATION
+    extern module htram_group; // aggregation only
+#endif
 
     include "types.h";
     // initnode function to register custom reduction
@@ -20,7 +22,9 @@ module unionFindLib {
 
         // function to register Phase 1 callback
         entry void register_phase_one_cb(CkCallback cb);
-        entry void set_tram_proxy(CProxy_HTram proxy);
+#ifdef AGGREGATION
+        entry void set_tram_proxy(CProxy_HTram proxy); // aggregation only
+#endif
         // functions to build inverted trees
         entry void union_request(uint64_t v, uint64_t w);
         // client-facing API addition: batched union requests (one message per PE)

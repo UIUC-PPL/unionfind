@@ -2,8 +2,12 @@
 #define UNION_FIND_LIB
 
 #include "unionFindLib.decl.h"
-#include <NDMeshStreamer.h>
 #include <unordered_map>
+
+#ifdef AGGREGATION
+// htram is only pulled in when compiled with aggregation; htram-off clients
+// can include this header with no htram header / -DUNIONFIND / include path.
+#include <NDMeshStreamer.h>
 #include "htram_group.h"
 
 //tram
@@ -11,6 +15,7 @@ using tram_proxy_t = CProxy_HTram;
 using tram_t = HTram;
 
 extern tram_proxy_t tram_proxy;
+#endif
 /*readonly*/ extern CProxy_UnionFindLib _UfLibProxy;
 
 struct unionFindVertex {
@@ -74,15 +79,20 @@ class UnionFindLib : public CBase_UnionFindLib {
     CkCallback postComponentLabelingCb;
     CkCallback postPruningCb;
     std::unordered_map<long int, cacheEntry> parentCache; //maps vertex numbers to component numbers
+#ifdef AGGREGATION
+    // htram state, only present when compiled with aggregation
     tram_t* tram;
     tram_proxy_t myTramProxy;
+#endif
 
     public:
     UnionFindLib() : myVertices(nullptr), numMyVertices(0) {}
     UnionFindLib(CkMigrateMessage *m) { }
     void pup(PUP::er &p) {
         CBase_UnionFindLib::pup(p);
-        p | myTramProxy;
+#ifdef AGGREGATION
+        p | myTramProxy; // htram proxy only exists under aggregation
+#endif
     }
     void ckJustMigrated() {
 #ifdef AGGREGATION
@@ -97,7 +107,9 @@ class UnionFindLib : public CBase_UnionFindLib {
     // array. `ready` fires (array reduction) once every element has been
     // constructed and wired, so the caller may safely follow with broadcasts.
     static CProxy_UnionFindLib unionFindInitOnePerNode(const CkCallback& ready);
-    void set_tram_proxy(tram_proxy_t proxy);
+#ifdef AGGREGATION
+    void set_tram_proxy(tram_proxy_t proxy); // htram wiring, aggregation only
+#endif
     void registerGetLocationFromID(std::pair<int, int> (*gloc)(uint64_t vid));
     void register_phase_one_cb(CkCallback cb);
     void initialize_vertices(unionFindVertex *appVertices, int numVertices);

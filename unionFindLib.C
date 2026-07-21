@@ -7,9 +7,12 @@
 /*readonly*/ CkGroupID libGroupID;
 CkReduction::reducerType mergeCountMapsReductionType;
 
+#ifdef AGGREGATION
+// htram readonly proxies, only defined when compiled with aggregation
 /* readonly */ CProxy_HTramRecv nodeGrpProxy;
 /* readonly */ CProxy_HTramNodeGrp srcNodeGrpProxy;
 /* readonly */ tram_proxy_t tram_proxy;
+#endif
 
 
 // custom reduction for merging local count maps
@@ -1066,11 +1069,13 @@ void UnionFindLib::quiesce(CkCallback cb) {
  * sets the tram proxy
  * and the func ptr for insertDataCaller
  */
+#ifdef AGGREGATION
 void UnionFindLib::set_tram_proxy(tram_proxy_t proxy) {
     myTramProxy = proxy;
     tram = myTramProxy.ckLocalBranch();
     tram->set_func_ptr(UnionFindLib::insertDataCaller, this);
 }
+#endif
 
 /**
  * @brief initializes unionFindLib and returns a union find lib proxy
