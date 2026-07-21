@@ -78,7 +78,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     tram_proxy_t myTramProxy;
 
     public:
-    UnionFindLib() {}
+    UnionFindLib() : myVertices(nullptr), numMyVertices(0) {}
     UnionFindLib(CkMigrateMessage *m) { }
     void pup(PUP::er &p) {
         CBase_UnionFindLib::pup(p);
