@@ -543,8 +543,12 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
 // Compresses all traversed local nodes to point directly to the local tip.
 void UnionFindLib::
 local_union(uint64_t vid1, uint64_t vid2) {
-    auto arrIdx = [](uint64_t vid) -> int { return (int)(vid & 0xFFFFFFFF); };
-    auto chareOf = [](uint64_t vid) -> int { return (int)(vid >> 32); };
+    // The original hard-coded the vertexID encoding (chare = vid >> 32,
+    // idx = vid & 0xFFFFFFFF), silently diverging from the registered
+    // getLocationFromID. Decode through the registered function so the
+    // application's encoding is authoritative on this fast path too.
+    auto arrIdx = [this](uint64_t vid) -> int { return getLocationFromID(vid).second; };
+    auto chareOf = [this](uint64_t vid) -> int { return getLocationFromID(vid).first; };
 
     // Walk parent chain staying within this chare.
     // Returns the local tip (either the actual root if parent==-1, or the last
@@ -590,7 +594,7 @@ local_union(uint64_t vid1, uint64_t vid2) {
         if (tip1 == tip2) return;
         if (tip2 < tip1) std::swap(tip1, tip2);
         findBossData d;
-        d.arrIdx = (int)(tip1 & 0xFFFFFFFF);
+        d.arrIdx = arrIdx(tip1); // decode through the registered function
         d.partnerOrBossID = tip2;
         d.senderID = -1;
         d.isFBOne = 1;
