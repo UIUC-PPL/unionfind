@@ -1,6 +1,7 @@
 #set the following variables to absolute paths
-PARENT_DIR = /Users/ritvik
-CHARM_DIR = $(PARENT_DIR)/clean_charm/charm
+PARENT_DIR = /Users/kale/software/clusterFinding
+CHARM_DIR = /Users/kale/software/clusterFinding/charm/netlrts-darwin-arm8-smp
+#CHARM_DIR = $(PARENT_DIR)/clean_charm/charm
 UNION_FIND_DIR = $(PARENT_DIR)/unionfind
 PREFIX_LIB_DIR = $(UNION_FIND_DIR)/prefixLib
 HTRAM_LIB_DIR = $(PARENT_DIR)/htram

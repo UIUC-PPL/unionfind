@@ -103,10 +103,20 @@ class UnionFindLib : public CBase_UnionFindLib {
     void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CkCallback ready);
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
     // Client-facing API addition: one library chare per PROCESS, element i on
-    // the first PE of node i (UFNodeMap), instead of binding to a client
-    // array. `ready` fires (array reduction) once every element has been
-    // constructed and wired, so the caller may safely follow with broadcasts.
+    // the first PE of node i (explicit insertion — NOT an array map; a
+    // freshly created map group races with array construction on runtimes
+    // without group-dependency buffering, e.g. reconverse). `ready` fires
+    // (array reduction) once every element has been constructed and wired,
+    // so the caller may safely follow with broadcasts.
     static CProxy_UnionFindLib unionFindInitOnePerNode(const CkCallback& ready);
+    // Race-safe form: `node_map` must be a UFNodeMap group the CALLER created
+    // EARLY (with any barrier between its ckNew and this call), so its
+    // branches exist on every process before the array construction that
+    // consults it. Required on runtimes without group-dependency buffering
+    // (reconverse): the one-argument form above creates the map inline and
+    // can abort with "Local branch of array map is NULL!" at scale.
+    static CProxy_UnionFindLib unionFindInitOnePerNode(const CkCallback& ready,
+                                                       CProxy_UFNodeMap node_map);
 #ifdef AGGREGATION
     void set_tram_proxy(tram_proxy_t proxy); // htram wiring, aggregation only
 #endif

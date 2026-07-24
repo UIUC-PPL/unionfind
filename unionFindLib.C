@@ -1138,12 +1138,18 @@ unionFindInit(CkArrayID clientArray, int n) {
  * wired); callers must wait on it before any broadcast that relies on the
  * prefix/group proxies, since message delivery is not ordered.
  */
+// Compatibility wrapper: creates the placement map inline, which is UNSAFE
+// on runtimes without group-dependency buffering (reconverse) — see the
+// overload below. Kept for classic-Converse clients; new callers should
+// pre-create the map at startup and use the two-argument form.
 CProxy_UnionFindLib UnionFindLib::
 unionFindInitOnePerNode(const CkCallback& ready) {
+    return unionFindInitOnePerNode(ready, CProxy_UFNodeMap::ckNew());
+}
+
+CProxy_UnionFindLib UnionFindLib::
+unionFindInitOnePerNode(const CkCallback& ready, CProxy_UFNodeMap node_map) {
     int n = CkNumNodes();
-    CProxy_UFNodeMap node_map = CProxy_UFNodeMap::ckNew();
-    CkArrayOptions opts(n);
-    opts.setMap(node_map);
 
     //tram init: mirror unionFindInit so the one-per-node path also works when
     //built with aggregation (htram) enabled.
@@ -1154,6 +1160,20 @@ unionFindInitOnePerNode(const CkCallback& ready) {
     //note buffer size: not used in smp
     tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), 1024, false, static_cast<double>(0.01)/1000, true, true, ignore_cb);
     #endif
+
+    // Array placement uses the caller-provided, PRE-CREATED UFNodeMap group.
+    // Creating the map group here and immediately ckNew'ing the array (the
+    // old idiom) RACES on runtimes without group-dependency buffering — the
+    // array-construction broadcast can reach a remote process before the map
+    // group's branch exists there, aborting with "Local branch of array map
+    // is NULL!" (reconverse, first seen at 32 processes on Anvil,
+    // 2026-07-24; classic Converse delays such messages and never exposed
+    // it). The caller must create the map EARLY (any barrier/QD between its
+    // ckNew and this call guarantees the branches exist). The map must stay:
+    // it also defines element HOMES, which boss_send's lastKnown() relies on
+    // to route htram traffic only to element-hosting first-PEs.
+    CkArrayOptions opts(n);
+    opts.setMap(node_map);
 
     CProxy_UnionFindLib lib_proxy = CProxy_UnionFindLib::ckNew(opts);
     _UfLibProxy = lib_proxy;
