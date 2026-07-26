@@ -67,8 +67,16 @@ static void register_merge_count_maps_reduction() {
  * a std::pair<int, int>
  */
 void UnionFindLib::
-registerGetLocationFromID(std::pair<int, int> (*gloc)(uint64_t vid)) {
+registerGetLocationFromID(std::pair<int, uint64_t> (*gloc)(uint64_t vid)) {
     getLocationFromID = gloc;
+}
+
+void UnionFindLib::
+enableLazyMode() {
+#ifdef ANCHOR_ALGO
+    CkAbort("[UnionFindLib] lazy vertex storage is not supported with ANCHOR_ALGO");
+#endif
+    lazy_mode = true;
 }
 
 void UnionFindLib::
@@ -102,11 +110,11 @@ initialize_vertices(unionFindVertex *appVertices, int numVertices) {
  */
 
 uint64_t UnionFindLib::get_parent(uint64_t vertexID) {
-    std::pair<int, int> loc = getLocationFromID(vertexID);
+    std::pair<int, uint64_t> loc = getLocationFromID(vertexID);
     if (loc.first != this->thisIndex) {
         CkAbort("[UnionFindLib] get_parent called with vertexID that does not belong to this chare!");
     }
-    return myVertices[loc.second].parent;
+    return vertexAt(loc.second)->parent;
 }
 
 
@@ -158,8 +166,8 @@ union_request(uint64_t vid1, uint64_t vid2) {
         return;
     }
 
-    std::pair<int, int> vid1_loc = getLocationFromID(vid1);
-    std::pair<int, int> vid2_loc = getLocationFromID(vid2);
+    std::pair<int, uint64_t> vid1_loc = getLocationFromID(vid1);
+    std::pair<int, uint64_t> vid2_loc = getLocationFromID(vid2);
 
     // Fast path: both vertices are on this chare — skip the find_boss protocol
     // entirely and do a local sequential union with full path compression.
@@ -225,7 +233,7 @@ void UnionFindLib::anchor_send(int chare_index, anchorData data) {
 
 void UnionFindLib::
 union_request(uint64_t v, uint64_t w) {
-    std::pair<int, int> w_loc = getLocationFromID(w);
+    std::pair<int, uint64_t> w_loc = getLocationFromID(w);
     // message w to anchor to v
     anchorData d;
     d.arrIdx = w_loc.second;
@@ -244,14 +252,14 @@ union_requests(const std::vector<UFEdge>& edges) {
 
 #ifndef ANCHOR_ALGO
 void UnionFindLib::
-find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
-    unionFindVertex *src = &myVertices[arrIdx];
+find_boss1(uint64_t arrIdx, uint64_t partnerID, uint64_t senderID) {
+    unionFindVertex *src = vertexAt(arrIdx);
     CkAssert(src->vertexID != src->parent);
     src->findOrAnchorCount++;
 
     if (src->parent == -1) {
         //boss1 found
-        std::pair<int, int> partner_loc = getLocationFromID(partnerID);
+        std::pair<int, uint64_t> partner_loc = getLocationFromID(partnerID);
         //message the chare containing the partner
         //senderID for first find_boss2 is not relevant, similar to first find_boss1
 
@@ -282,7 +290,7 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
     }
     else {
         //boss1 not found, move to parent
-        std::pair<int, int> parent_loc = getLocationFromID(src->parent);
+        std::pair<int, uint64_t> parent_loc = getLocationFromID(src->parent);
         unionFindVertex *path_base = src;
         unionFindVertex *parent, *curr = src;
 
@@ -294,7 +302,7 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
            all local trees completely shallow
         */
         while (parent_loc.first == this->thisIndex) {
-            parent = &myVertices[parent_loc.second];
+            parent = vertexAt(parent_loc.second);
 
             // entire tree is local to chare
             if (parent->parent ==  -1) {
@@ -355,8 +363,8 @@ find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID) {
 
 
 void UnionFindLib::
-find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
-    unionFindVertex *src = &myVertices[arrIdx]; // vid1, other field is vid2 (boss1ID) - same for find_boss1
+find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
+    unionFindVertex *src = vertexAt(arrIdx); // vid1, other field is vid2 (boss1ID) - same for find_boss1
     CkAssert(src->vertexID != src->parent);
     src->findOrAnchorCount++;
 
@@ -387,13 +395,13 @@ find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
     else {
         //boss2 not found, move to parent
         //std::pair<int,int> parent_loc = appPtr->getLocationFromID(src->parent);
-        std::pair<int, int> parent_loc = getLocationFromID(src->parent);
+        std::pair<int, uint64_t> parent_loc = getLocationFromID(src->parent);
         unionFindVertex *path_base = src;
         unionFindVertex *parent, *curr = src;
 
         // same optimizations as in find_boss1
         while (parent_loc.first == this->thisIndex) {
-            parent = &myVertices[parent_loc.second];
+            parent = vertexAt(parent_loc.second);
 
             if (parent->parent ==  -1) {
                 local_path_compression(path_base, parent->vertexID);
@@ -453,8 +461,8 @@ find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID) {
 }
 #else
 void UnionFindLib::
-anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
-    unionFindVertex *w = &myVertices[w_arrIdx];
+anchor(uint64_t w_arrIdx, uint64_t v, long int path_base_arrIdx) {
+    unionFindVertex *w = vertexAt(w_arrIdx);
     w->findOrAnchorCount++;
 
     //this case is if the vertices are already in the same component
@@ -462,7 +470,7 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
     if (w->parent == v) {
       // call local_path_compression with v as parent
       if (path_base_arrIdx != -1) {
-        unionFindVertex *path_base = &myVertices[path_base_arrIdx];
+        unionFindVertex *path_base = vertexAt(path_base_arrIdx);
         local_path_compression(path_base, v);
       }
       return;
@@ -474,12 +482,12 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
     //key: efficiently maintain minheap by switching 
     if (w->vertexID < v) {
         // incorrect order, swap the vertices
-        std::pair<int, int> v_loc = getLocationFromID(v);
+        std::pair<int, uint64_t> v_loc = getLocationFromID(v);
         if (v_loc.first == thisIndex) {
             // vertex available locally, avoid extra message
             if (path_base_arrIdx != -1) {
               // Have to change the direction; so compress path for w
-              unionFindVertex *path_base = &myVertices[path_base_arrIdx];
+              unionFindVertex *path_base = vertexAt(path_base_arrIdx);
               // FIXME: what happens if w is not in this chare?
               local_path_compression(path_base, w->vertexID);
             }
@@ -498,7 +506,7 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
     else if (w->parent == w->vertexID) {
       // I have reached the root; check if I can call local_path_compression
       if (path_base_arrIdx != -1) {
-        unionFindVertex *path_base = &myVertices[path_base_arrIdx];
+        unionFindVertex *path_base = vertexAt(path_base_arrIdx);
         // Make all nodes point to this parent v
         local_path_compression(path_base, v);
       }
@@ -514,16 +522,16 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
     //correct order (w is larger) and not at the root
     else {
         // call anchor for w's parent
-        std::pair<int, int> w_parent_loc = getLocationFromID(w->parent);
+        std::pair<int, uint64_t> w_parent_loc = getLocationFromID(w->parent);
         if (w_parent_loc.first == thisIndex) {
             if (path_base_arrIdx == -1) {
               // Start from w; a wasted call if there is only one node and its child in the PE
-              std::pair<int, int> w_loc = getLocationFromID(w->vertexID);
+              std::pair<int, uint64_t> w_loc = getLocationFromID(w->vertexID);
               path_base_arrIdx = w_loc.second; 
             }
             else {
                 //looks like dead code?
-              std::pair<int, int> w_loc = getLocationFromID(w->vertexID);
+              std::pair<int, uint64_t> w_loc = getLocationFromID(w->vertexID);
               // assert (path_base_arrIdx != w_loc.second);
             }
             // anchor(w_parent_loc.second, v, -1);
@@ -533,7 +541,7 @@ anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx) {
         else {
           // Moving away from this node; see if local_path_compression should be done
           if (path_base_arrIdx != -1) {
-            unionFindVertex *path_base = &myVertices[path_base_arrIdx];
+            unionFindVertex *path_base = vertexAt(path_base_arrIdx);
             // Make all nodes point to this parent w
             assert (path_base->vertexID != w->vertexID);
             local_path_compression(path_base, w->vertexID);
@@ -569,7 +577,7 @@ local_union(uint64_t vid1, uint64_t vid2) {
     auto find_local_tip = [&](uint64_t start, bool &crossed_boundary) -> uint64_t {
         uint64_t curr = start;
         while (true) {
-            int64_t par = myVertices[arrIdx(curr)].parent;
+            int64_t par = vertexAt(arrIdx(curr))->parent;
             if (par == -1) {
                 // curr is the actual root of its component (locally)
                 crossed_boundary = false;
@@ -587,8 +595,8 @@ local_union(uint64_t vid1, uint64_t vid2) {
         // Compress: point every node on the path directly to tip
         curr = start;
         while (curr != tip) {
-            int64_t next = myVertices[arrIdx(curr)].parent;
-            myVertices[arrIdx(curr)].parent = (int64_t)tip;
+            int64_t next = vertexAt(arrIdx(curr))->parent;
+            vertexAt(arrIdx(curr))->parent = (int64_t)tip;
             curr = (uint64_t)next;
         }
         return tip;
@@ -616,11 +624,11 @@ local_union(uint64_t vid1, uint64_t vid2) {
     // Both paths ended at actual roots on this chare — merge directly.
     if (tip1 == tip2) return; // already same component
     if (tip1 < tip2) {
-        myVertices[arrIdx(tip1)].size += myVertices[arrIdx(tip2)].size;
-        myVertices[arrIdx(tip2)].parent = (int64_t)tip1;
+        vertexAt(arrIdx(tip1))->size += vertexAt(arrIdx(tip2))->size;
+        vertexAt(arrIdx(tip2))->parent = (int64_t)tip1;
     } else {
-        myVertices[arrIdx(tip2)].size += myVertices[arrIdx(tip1)].size;
-        myVertices[arrIdx(tip1)].parent = (int64_t)tip2;
+        vertexAt(arrIdx(tip2))->size += vertexAt(arrIdx(tip1))->size;
+        vertexAt(arrIdx(tip1))->parent = (int64_t)tip2;
     }
 }
 
@@ -630,7 +638,7 @@ local_path_compression(unionFindVertex *src, uint64_t compressedParent) {
     // An infinite loop if this function is called on itself (a node which does not have itself as its parent)
     while (src->parent != compressedParent) {
         // CkPrintf("Stuck here\n");
-        tmp = &myVertices[getLocationFromID(src->parent).second];
+        tmp = vertexAt(getLocationFromID(src->parent).second);
         src->parent = compressedParent;
         src =tmp;
     }
@@ -649,7 +657,7 @@ check_same_chares(uint64_t v1, uint64_t v2) {
 // short circuit a vertex to point to grandparent
 void UnionFindLib::
 short_circuit_parent(shortCircuitData scd) {
-    unionFindVertex *src = &myVertices[scd.arrIdx];
+    unionFindVertex *src = vertexAt(scd.arrIdx);
     //CkPrintf("[TP %d] Short circuiting %ld from current parent %ld to grandparent %ld\n", thisIndex, src->vertexID, src->parent, grandparentID);
     src->parent = scd.grandparentID;
     CkAssert(src->parent != src->vertexID); // TODO: remove assert
@@ -657,11 +665,11 @@ short_circuit_parent(shortCircuitData scd) {
 
 // function to implement simple path compression; currently unused
 void UnionFindLib::
-compress_path(int arrIdx, uint64_t compressedParent) {
-    unionFindVertex *src = &myVertices[arrIdx];
+compress_path(uint64_t arrIdx, uint64_t compressedParent) {
+    unionFindVertex *src = vertexAt(arrIdx);
     //message the parent before reseting it
     if (src->vertexID != compressedParent) {//reached the top of path
-        std::pair<int, int> parent_loc = getLocationFromID(src->parent);
+        std::pair<int, uint64_t> parent_loc = getLocationFromID(src->parent);
         this->thisProxy[parent_loc.first].compress_path(parent_loc.second, compressedParent);
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         libGroup.ckLocalBranch()->increase_message_count();
@@ -673,18 +681,18 @@ compress_path(int arrIdx, uint64_t compressedParent) {
 // If this vertex is no longer a root (it was merged), forwards to current parent
 // so that no size contribution is lost regardless of message ordering.
 void UnionFindLib::
-add_size(int arrIdx, int64_t delta) {
+add_size(uint64_t arrIdx, int64_t delta) {
 #ifndef ANCHOR_ALGO
-    bool is_root = (myVertices[arrIdx].parent == -1);
+    bool is_root = (vertexAt(arrIdx)->parent == -1);
 #else
     // Match existing root checks (e.g. line 641): use unsigned promotion so
     // high-bit vertex IDs compare correctly against int64_t parent.
-    bool is_root = ((uint64_t)myVertices[arrIdx].parent == myVertices[arrIdx].vertexID);
+    bool is_root = ((uint64_t)vertexAt(arrIdx)->parent == vertexAt(arrIdx)->vertexID);
 #endif
     if (is_root) {
-        myVertices[arrIdx].size += delta;
+        vertexAt(arrIdx)->size += delta;
     } else {
-        std::pair<int,int> par_loc = getLocationFromID((uint64_t)myVertices[arrIdx].parent);
+        std::pair<int,int> par_loc = getLocationFromID((uint64_t)vertexAt(arrIdx)->parent);
         if (par_loc.first == thisIndex) {
             add_size(par_loc.second, delta);
         } else {
@@ -695,6 +703,8 @@ add_size(int arrIdx, int64_t delta) {
 
 unionFindVertex* UnionFindLib::
 return_vertices() {
+    if (lazy_mode)
+        CkAbort("[UnionFindLib] get_vertices is dense-mode only; use collectComponentLabels in lazy mode");
     return myVertices;
 }
 
@@ -710,18 +720,19 @@ return_vertices() {
 void UnionFindLib::
 find_components(CkCallback cb) {
     postComponentLabelingCb = cb;
-    // count local numBosses
+    // count local numBosses (forEachVertex: dense = whole array, lazy =
+    // touched vertices only — untouched ids are implicitly their own
+    // components and are not counted here; see the lazy-mode semantics note)
     myLocalNumBosses = 0;
-    for (int i = 0; i < numMyVertices; i++) {
+    forEachVertex([&](unionFindVertex& vtx, uint64_t) {
 #ifndef ANCHOR_ALGO
-        if (myVertices[i].parent == -1) {
+        if (vtx.parent == -1)
 #else
         // for Anchor algo, each vertex is ititially the parent of itself
-        if (myVertices[i].parent == myVertices[i].vertexID) {
+        if ((uint64_t)vtx.parent == vtx.vertexID)
 #endif
             myLocalNumBosses += 1;
-        }
-    }
+    });
 
     // send local count to prefix library
     CkCallback doneCb(CkReductionTarget(UnionFindLib, boss_count_prefix_done), thisProxy);
@@ -742,16 +753,16 @@ boss_count_prefix_done(int totalCount) {
     // start labeling my local bosses from myStartIndex
     // ensures sequential numbering of components
     if (myLocalNumBosses != 0) {
-        for (int i = 0; i < numMyVertices; i++) {
+        forEachVertex([&](unionFindVertex& vtx, uint64_t) {
 #ifndef ANCHOR_ALGO
-            if (myVertices[i].parent == -1) {
+            if (vtx.parent == -1) {
 #else
-            if (myVertices[i].parent == myVertices[i].vertexID) {
+            if ((uint64_t)vtx.parent == vtx.vertexID) {
 #endif
-                myVertices[i].componentNumber = myStartIndex;
+                vtx.componentNumber = myStartIndex;
                 myStartIndex++;
             }
-        }
+        });
     }
 
     CkAssert(myStartIndex == v);
@@ -762,12 +773,12 @@ boss_count_prefix_done(int totalCount) {
 
 void UnionFindLib::
 start_component_labeling() {
-    for (int i = 0; i < numMyVertices; i++) {
-        unionFindVertex *v = &myVertices[i];
+    forEachVertex([&](unionFindVertex& vtx, uint64_t i) {
+        unionFindVertex *v = &vtx;
 #ifndef ANCHOR_ALGO
         if (v->parent == -1) {
 #else
-        if (v->parent == v->vertexID) {
+        if ((uint64_t)v->parent == v->vertexID) {
 #endif
             // one of the bosses/root found
             CkAssert(v->componentNumber != -1); // phase 2a assigned serial numbers
@@ -799,7 +810,7 @@ start_component_labeling() {
             else
             {
                 // an internal node or leaf node, request parent for boss
-                std::pair<int, int> parent_loc = getLocationFromID(v->parent);
+                std::pair<int, uint64_t> parent_loc = getLocationFromID(v->parent);
                 needBossData data;
                 data.arrIdx = parent_loc.second;
                 data.senderID = v->vertexID;
@@ -813,7 +824,7 @@ start_component_labeling() {
                 }
             }
         }
-    }
+    });
 
     if (this->thisIndex == 0) {
         // return back to application after completing all messaging related to
@@ -850,27 +861,27 @@ insertDataAnchor(const anchorData & data) {
 #endif
 
 void UnionFindLib::
-need_boss(int arrIdx, uint64_t fromID) {
+need_boss(uint64_t arrIdx, uint64_t fromID) {
     // one of children of this node needs boss, handle by either 
     // replying immediately or queueing the request
 
-    if (myVertices[arrIdx].componentNumber != -1) {
+    if (vertexAt(arrIdx)->componentNumber != -1) {
         // component already set, reply back
-        std::pair<int, int> requestor_loc = getLocationFromID(fromID);
+        std::pair<int, uint64_t> requestor_loc = getLocationFromID(fromID);
         if (requestor_loc.first == thisIndex) {
-            set_component(requestor_loc.second, myVertices[arrIdx].componentNumber, myVertices[arrIdx].componentSize);
+            set_component(requestor_loc.second, vertexAt(arrIdx)->componentNumber, vertexAt(arrIdx)->componentSize);
         } else {
-            this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, myVertices[arrIdx].componentNumber, myVertices[arrIdx].componentSize);
+            this->thisProxy[requestor_loc.first].set_component(requestor_loc.second, vertexAt(arrIdx)->componentNumber, vertexAt(arrIdx)->componentSize);
         }
     }
     else {
         // boss still not found, queue the request
-        myVertices[arrIdx].need_boss_requests.push_back(fromID);
+        vertexAt(arrIdx)->need_boss_requests.push_back(fromID);
     }
 }
 
 void UnionFindLib::
-set_component(int arrIdx, long int compNum, int64_t compSize) {
+set_component(uint64_t arrIdx, long int compNum, int64_t compSize) {
     // Iterative propagation via an explicit work queue to avoid stack overflow
     // from deep recursive chains when union-find trees are not fully compressed.
     std::vector<int> work_queue;
@@ -880,12 +891,12 @@ set_component(int arrIdx, long int compNum, int64_t compSize) {
         int idx = work_queue.back();
         work_queue.pop_back();
 
-        myVertices[idx].componentNumber = compNum;
-        myVertices[idx].componentSize = compSize;
+        vertexAt(idx)->componentNumber = compNum;
+        vertexAt(idx)->componentSize = compSize;
 
         // Update parentCache entry if this vertex's parent is on a different chare
-        int64_t my_parent = myVertices[idx].parent;
-        std::pair<int, int> parent_loc = getLocationFromID((uint64_t)my_parent);
+        int64_t my_parent = vertexAt(idx)->parent;
+        std::pair<int, uint64_t> parent_loc = getLocationFromID((uint64_t)my_parent);
         if (parent_loc.first != thisIndex)
         {
             if (parentCache.count(my_parent) != 0)
@@ -902,9 +913,9 @@ set_component(int arrIdx, long int compNum, int64_t compSize) {
         // Respond to all vertices that were waiting for this vertex's component label.
         // Drain the actual queue (not a copy) so requests are not re-processed.
         std::vector<uint64_t> local_requests;
-        local_requests.swap(myVertices[idx].need_boss_requests);
+        local_requests.swap(vertexAt(idx)->need_boss_requests);
         for (uint64_t requestorID : local_requests) {
-            std::pair<int, int> requestor_loc = getLocationFromID(requestorID);
+            std::pair<int, uint64_t> requestor_loc = getLocationFromID(requestorID);
             if (requestor_loc.first == thisIndex) {
                 work_queue.push_back(requestor_loc.second);
             } else {
@@ -929,23 +940,22 @@ prune_components(int threshold, CkCallback appReturnCb) {
 
     int localSurviving = 0;
     long bucket[64] = {0}; // for component size distribution, can be removed later
-    for (int i = 0; i < numMyVertices; i++) {
-        if (myVertices[i].componentSize <= threshold) {
-            myVertices[i].componentNumber = -1;
+    forEachVertex([&](unionFindVertex& vtx, uint64_t) {
+        if (vtx.componentSize <= threshold) {
+            vtx.componentNumber = -1;
         } else {
             // count surviving bosses to get total component count
 #ifndef ANCHOR_ALGO
-            //if (myVertices[i].parent == -1) localSurviving++;
-            if (myVertices[i].parent == -1)
+            if (vtx.parent == -1)
             {
-                bucket[(int) log(myVertices[i].componentSize)]++;
+                bucket[(int) log(vtx.componentSize)]++;
                 localSurviving++;
             }
 #else
-            if (myVertices[i].parent == (int64_t)myVertices[i].vertexID) localSurviving++;
+            if (vtx.parent == (int64_t)vtx.vertexID) localSurviving++;
 #endif
         }
-    }
+    });
 
 
     // pack surviving count + bucket distribution into one array for a single reduction
@@ -975,15 +985,12 @@ perform_pruning() {
 
     CProxy_UnionFindLibGroup libGroup(libGroupID);
 
-    for (int i = 0; i < numMyVertices; i++) {
-        int myComponentCount = libGroup.ckLocalBranch()->get_component_count(myVertices[i].componentNumber);
+    forEachVertex([&](unionFindVertex& vtx, uint64_t) {
+        int myComponentCount = libGroup.ckLocalBranch()->get_component_count(vtx.componentNumber);
         if (myComponentCount <= componentPruneThreshold) {
-            myVertices[i].componentNumber = -1;
+            vtx.componentNumber = -1;
         }
-#ifdef PROFILING
-        //CkPrintf("Vertex ID : %d, count : %ld\n", myVertices[i].vertexID, myVertices[i].findOrAnchorCount);
-#endif
-    }
+    });
 
     if (thisIndex == 0) {
         //CkPrintf("Number of components found: %d\n", totalNumBosses);
@@ -999,10 +1006,10 @@ perform_pruning() {
 
 #ifdef PROFILING
     long int maxCount = -1;
-    for (int i = 0; i < numMyVertices; i++) {
-        if (myVertices[i].findOrAnchorCount > maxCount)
-            maxCount = myVertices[i].findOrAnchorCount;
-    }
+    forEachVertex([&](unionFindVertex& vtx, uint64_t) {
+        if (vtx.findOrAnchorCount > maxCount)
+            maxCount = vtx.findOrAnchorCount;
+    });
     CkCallback cb(CkReductionTarget(UnionFindLib, profiling_count_max), thisProxy[0]);
     contribute(sizeof(long int), &maxCount, CkReduction::max_long, cb);
 #endif
@@ -1147,6 +1154,18 @@ unionFindInitOnePerNode(const CkCallback& ready) {
     return unionFindInitOnePerNode(ready, CProxy_UFNodeMap::ckNew());
 }
 
+// Lazy-mode variant: identical placement and wiring, but every element
+// switches to lazy vertex storage before `ready` fires (enableLazyMode is
+// broadcast after creation; array broadcasts from the same source are
+// delivered in order, so it precedes any union_request the caller sends
+// after ready).
+CProxy_UnionFindLib UnionFindLib::
+unionFindInitOnePerNodeLazy(const CkCallback& ready, CProxy_UFNodeMap node_map) {
+    CProxy_UnionFindLib lib_proxy = unionFindInitOnePerNode(ready, node_map);
+    lib_proxy.enableLazyMode();
+    return lib_proxy;
+}
+
 CProxy_UnionFindLib UnionFindLib::
 unionFindInitOnePerNode(const CkCallback& ready, CProxy_UFNodeMap node_map) {
     int n = CkNumNodes();
@@ -1220,9 +1239,9 @@ merge_count_results(int* totalCounts, int numElems) {
 
     CkAssert(numElems == totalNumBosses);
     for (int i = 0; i < numMyVertices; i++) {
-        int myComponentCount = totalCounts[myVertices[i].componentNumber];
+        int myComponentCount = totalCounts[vertexAt(i)->componentNumber];
         if (myComponentCount <= componentPruneThreshold) {
-            myVertices[i].componentNumber = -1;
+            vertexAt(i)->componentNumber = -1;
         }
     }
 
@@ -1248,9 +1267,9 @@ prune_components(int threshold, CkCallback appReturnCb) {
     std::unordered_map<long int, int> temp_count;
 
     // populate local count map
-    for (int i = 0; i < numMyVertices; i++) {
-        temp_count[myVertices[i].componentNumber]++;
-    }
+    forEachVertex([&](unionFindVertex& vtx, uint64_t) {
+        temp_count[vtx.componentNumber]++;
+    });
 
     // Sanity check
     /*std::map<long int,int>::iterator it = temp_count.begin();
@@ -1291,15 +1310,15 @@ merge_count_results(CkReductionMsg *msg) {
     CProxy_UnionFindLibGroup libGroup(libGroupID);
     libGroup.ckLocalBranch()->build_component_count_map(msg, totalNumBosses);
 
-    for (int i = 0; i < numMyVertices; i++) {
+    forEachVertex([&](unionFindVertex& vtx, uint64_t) {
         // query the group chare to get component count
-        int myComponentCount = libGroup.ckLocalBranch()->get_component_count(myVertices[i].componentNumber);
-        CkAssert(myVertices[i].componentNumber < totalNumBosses);
+        int myComponentCount = libGroup.ckLocalBranch()->get_component_count(vtx.componentNumber);
+        CkAssert(vtx.componentNumber < totalNumBosses);
         if (myComponentCount <= componentPruneThreshold) {
             // vertex belongs to a minor component, ignore by setting to -1
-            myVertices[i].componentNumber = -1;
+            vtx.componentNumber = -1;
         }
-    }
+    });
 }
 
 

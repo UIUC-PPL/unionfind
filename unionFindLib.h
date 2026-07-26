@@ -73,7 +73,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     int numMyVertices;
     int pathCompressionThreshold = 5;
     int componentPruneThreshold;
-    std::pair<int, int> (*getLocationFromID)(uint64_t vid);
+    std::pair<int, uint64_t> (*getLocationFromID)(uint64_t vid);
     int myLocalNumBosses;
     int totalNumBosses;
     CkCallback postComponentLabelingCb;
@@ -100,6 +100,47 @@ class UnionFindLib : public CBase_UnionFindLib {
 #endif
         CBase_UnionFindLib::ckJustMigrated();
     }
+    // ---- Lazy vertex storage (sparse-uf2 design, 2026-07-25) ----
+    // In lazy mode there is no pre-initialized vertex array: a vertex record
+    // is created in lazy_store the first time a message references its local
+    // id. Right for clients whose id space is huge but sparsely touched
+    // (fragment-level FoF: ~66k of 23.7M at 80M). Dense mode (the array) is
+    // unchanged and remains right for mostly-touched id spaces. The client
+    // must register makeVertexID (the inverse of getLocationFromID) so a
+    // lazily created vertex can reconstruct its full id from (chare, local).
+    bool lazy_mode = false;
+    std::unordered_map<uint64_t, unionFindVertex> lazy_store;
+    uint64_t (*makeVertexID)(int chareIdx, uint64_t localId) = nullptr;
+    void enableLazyMode();
+    void registerMakeVertexID(uint64_t (*fn)(int, uint64_t)) { makeVertexID = fn; }
+    unionFindVertex* vertexAt(uint64_t idx) {
+        if (!lazy_mode) return &myVertices[idx];
+        auto it = lazy_store.find(idx);
+        if (it == lazy_store.end()) {
+            unionFindVertex v;
+            v.vertexID = makeVertexID(this->thisIndex, idx);
+            v.parent = -1;
+            v.process_tip = -1;
+            it = lazy_store.emplace(idx, std::move(v)).first;
+        }
+        return &it->second;
+    }
+    // Iterate every EXISTING vertex (dense: the whole array; lazy: touched
+    // only). f(vertex&, localId).
+    template <typename F> void forEachVertex(F&& f) {
+        if (lazy_mode) {
+            for (auto& kv : lazy_store) f(kv.second, kv.first);
+        } else {
+            for (int64_t i = 0; i < numMyVertices; i++) f(myVertices[i], (uint64_t)i);
+        }
+    }
+    // Lazy-mode label readback: localId -> componentNumber of every touched
+    // vertex (plain method, call via ckLocal on the element's home PE).
+    void collectComponentLabels(std::unordered_map<uint64_t, long>& out) {
+        for (auto& kv : lazy_store) out[kv.first] = kv.second.componentNumber;
+    }
+    // -------------------------------------------------------------
+
     void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CkCallback ready);
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
     // Client-facing API addition: one library chare per PROCESS, element i on
@@ -117,10 +158,14 @@ class UnionFindLib : public CBase_UnionFindLib {
     // can abort with "Local branch of array map is NULL!" at scale.
     static CProxy_UnionFindLib unionFindInitOnePerNode(const CkCallback& ready,
                                                        CProxy_UFNodeMap node_map);
+    // Lazy-mode variant: same placement, but elements use lazy vertex
+    // storage (enableLazyMode broadcast before ready fires).
+    static CProxy_UnionFindLib unionFindInitOnePerNodeLazy(const CkCallback& ready,
+                                                           CProxy_UFNodeMap node_map);
 #ifdef AGGREGATION
     void set_tram_proxy(tram_proxy_t proxy); // htram wiring, aggregation only
 #endif
-    void registerGetLocationFromID(std::pair<int, int> (*gloc)(uint64_t vid));
+    void registerGetLocationFromID(std::pair<int, uint64_t> (*gloc)(uint64_t vid));
     void register_phase_one_cb(CkCallback cb);
     void initialize_vertices(unionFindVertex *appVertices, int numVertices);
     uint64_t get_parent(uint64_t vertexID);
@@ -134,8 +179,8 @@ class UnionFindLib : public CBase_UnionFindLib {
     }
     void boss_send(int chare_index, findBossData data); //sends during boss finding, with or without aggregation
     void union_request(uint64_t vid1, uint64_t vid2);
-    void find_boss1(int arrIdx, uint64_t partnerID, uint64_t senderID);
-    void find_boss2(int arrIdx, uint64_t boss1ID, uint64_t senderID);
+    void find_boss1(uint64_t arrIdx, uint64_t partnerID, uint64_t senderID);
+    void find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID);
 #else
     static void insertDataCaller(void *p, anchorData data) {
         UnionFindLib *lib = _UfLibProxy[data.targetChareIdx].ckLocal();
@@ -147,7 +192,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     }
     void anchor_send(int chare_index, anchorData data); //sends during anchoring, with or without aggregation
     void union_request(uint64_t v, uint64_t w);
-    void anchor(int w_arrIdx, uint64_t v, long int path_base_arrIdx);
+    void anchor(uint64_t w_arrIdx, uint64_t v, long int path_base_arrIdx);
 #endif
     // client-facing API addition: batched union requests (one message per PE).
     // Placed outside the ANCHOR_ALGO guard: both algo variants provide a
@@ -159,7 +204,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     void local_path_compression(unionFindVertex *src, uint64_t compressedParent);
     bool check_same_chares(uint64_t v1, uint64_t v2);
     void short_circuit_parent(shortCircuitData scd);
-    void compress_path(int arrIdx, uint64_t compressedParent);
+    void compress_path(uint64_t arrIdx, uint64_t compressedParent);
     unionFindVertex *return_vertices();
 
     // functions and data structures for finding connected components
@@ -173,9 +218,9 @@ class UnionFindLib : public CBase_UnionFindLib {
 #ifdef ANCHOR_ALGO
     void insertDataAnchor(const anchorData & data);
 #endif
-    void need_boss(int arrIdx, uint64_t fromID);
-    void add_size(int arrIdx, int64_t delta);
-    void set_component(int arrIdx, long int compNum, int64_t compSize);
+    void need_boss(uint64_t arrIdx, uint64_t fromID);
+    void add_size(uint64_t arrIdx, int64_t delta);
+    void set_component(uint64_t arrIdx, long int compNum, int64_t compSize);
     void prune_components(int threshold, CkCallback appReturnCb);
     void perform_pruning();
     void report_surviving_components(long *totalData, int numElems);
