@@ -9,7 +9,14 @@ HTRAM_LIB_DIR = $(PARENT_DIR)/htram
 #ANCHOR= -DANCHOR_ALGO
 ANCHOR= 
 PROFILE= -DPROFILING
-AGGREGATION = -DAGGREGATION
+# htram aggregation: DEFAULT OFF (2026-07-27 measurement, 80M at 480 PEs:
+# aggregation cost 1-2.4 s of the union-find phase while carrying only 22k
+# edges — tram group creation + per-destination buffers scale with PE
+# count). Turn on for multi-billion-particle / very-high-edge-count runs:
+#   make AGGREGATION=-DAGGREGATION
+# ABI: this flag changes unionFindLib.h's class layout; the CLIENT build
+# (e.g. paratreet2) must use the SAME setting, and both need make clean.
+AGGREGATION =
 #for datatype declaration
 UNIONFIND= -DUNIONFIND
 CHARMC = $(CHARM_DIR)/bin/charmc $(ANCHOR) $(PROFILE) $(UNIONFIND) $(AGGREGATION)
