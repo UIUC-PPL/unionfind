@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: UnionFindLib
+abstract: >-
+  A Charm++ library for performing union-find operations on graphs in a
+  distributed, asynchronous fashion, for use in generic Charm++-based graph
+  applications.
+type: software
+authors:
+  - given-names: Raghavendra
+    family-names: Kanakagiri
+  - given-names: Ritvik
+    family-names: Rao
+    email: rsrao2@illinois.edu
+  - given-names: Laxmikant
+    family-names: Kale
+  - given-names: Karthik
+    family-names: Senthil
+repository-code: "https://github.com/UIUC-PPL/unionfind"
+date-released: "2018-10-10"
+keywords:
+  - union-find
+  - connected-components
+  - graph-algorithms
+  - distributed-computing
+  - charm++
