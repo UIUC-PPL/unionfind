@@ -5,6 +5,11 @@
 *.decl.h
 *.def.h
 
+#ignore projections traces
+*.projrc
+*.sts
+*.log.gz
+
 #ignore executables
 charmrun
 *.swp
