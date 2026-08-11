@@ -63,6 +63,10 @@ module unionFindLib {
         // TRAM functions
         entry void insertDataFindBoss(const findBossData & data);
         entry void insertDataNeedBoss(const needBossData & data);
+        // Batched labeling requests: one message per (source chare,
+        // destination chare) pair for the start_component_labeling
+        // scatter, instead of one message per requesting vertex.
+        entry void insertDataNeedBossBatch(const std::vector<needBossData>& batch);
 #ifdef ANCHOR_ALGO
         entry void insertDataAnchor(const anchorData & data);
 #endif

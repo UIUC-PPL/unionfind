@@ -50,7 +50,8 @@ struct componentCountMap {
 };
 
 typedef struct componentCacheEntry {
-    long int compNum;
+    long int compNum = -1; // -1 = pending (no label yet); entry creation
+                           // relies on this default (start_component_labeling)
     int64_t compSize = -1;
     std::vector<long int> requestors;
 
@@ -214,6 +215,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     void boss_count_prefix_done(int totalCount);
     void start_component_labeling();
     void insertDataNeedBoss(const needBossData & data);
+    void insertDataNeedBossBatch(const std::vector<needBossData>& batch);
     void insertDataFindBoss(const findBossData & data);
 #ifdef ANCHOR_ALGO
     void insertDataAnchor(const anchorData & data);
