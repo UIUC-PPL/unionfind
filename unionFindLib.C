@@ -720,6 +720,9 @@ return_vertices() {
 void UnionFindLib::
 find_components(CkCallback cb) {
     postComponentLabelingCb = cb;
+    // Stale entries from a previous labeling run would serve wrong labels
+    // (the cache is consulted before any request is sent).
+    parentCache.clear();
     // count local numBosses (forEachVertex: dense = whole array, lazy =
     // touched vertices only — untouched ids are implicitly their own
     // components and are not counted here; see the lazy-mode semantics note)
@@ -773,6 +776,13 @@ boss_count_prefix_done(int totalCount) {
 
 void UnionFindLib::
 start_component_labeling() {
+    // Per-destination request buffers: the scatter below sends at most ONE
+    // message per peer chare (a vector of requests) instead of one message
+    // per requesting vertex. Together with the parent cache below, which
+    // collapses same-parent requests to a single entry, this is the
+    // labeling-scatter batching (paratreet2 design/relabel-representative.md
+    // era agenda item; observed ~1400 per-vertex sends from one chare at 2B).
+    std::unordered_map<int, std::vector<needBossData>> dest_buf;
     forEachVertex([&](unionFindVertex& vtx, uint64_t i) {
         unionFindVertex *v = &vtx;
 #ifndef ANCHOR_ALGO
@@ -820,11 +830,23 @@ start_component_labeling() {
                 }
                 else
                 {
-                    this->thisProxy[parent_loc.first].insertDataNeedBoss(data);
+                    // First request for this remote parent CREATES its cache
+                    // entry (compNum -1 = pending), so every later vertex with
+                    // the same parent takes the requestors-queue branch above
+                    // instead of sending its own request; set_component's
+                    // cache fan-out drains the queue when the reply arrives.
+                    // (The entry-creation step was missing before, which left
+                    // the cache permanently empty and the dedup inoperative.)
+                    parentCache[v->parent].compNum = -1; // pending entry
+                    dest_buf[parent_loc.first].push_back(data);
                 }
             }
         }
     });
+
+    // Flush the batched scatter: one message per destination chare.
+    for (auto& kv : dest_buf)
+        this->thisProxy[kv.first].insertDataNeedBossBatch(kv.second);
 
     if (this->thisIndex == 0) {
         // return back to application after completing all messaging related to
@@ -850,6 +872,15 @@ insertDataNeedBoss(const needBossData & data) {
     int arrIdx = data.arrIdx;
     uint64_t fromID = data.senderID;
     this->need_boss(arrIdx, fromID);
+}
+
+// Batched form of the labeling scatter: one message per (source chare,
+// destination chare) pair carrying every request the source buffered for
+// this destination during start_component_labeling.
+void UnionFindLib::
+insertDataNeedBossBatch(const std::vector<needBossData>& batch) {
+    for (const needBossData& data : batch)
+        this->need_boss(data.arrIdx, data.senderID);
 }
 
 #ifdef ANCHOR_ALGO
@@ -907,6 +938,14 @@ set_component(uint64_t arrIdx, long int compNum, int64_t compSize) {
                 {
                     work_queue.push_back(parentCache[my_parent].requestors[j]);
                 }
+                // Drain-once: without this clear, any later cascade through a
+                // vertex sharing this parent re-pushes the same requestors —
+                // including, for a requestor whose parent IS this entry, the
+                // requestor itself, which cycles the work queue forever. This
+                // path was unreachable while the cache was never populated;
+                // the entry-creation fix above made it live and the loop
+                // reproduced immediately (10k, 2 processes).
+                parentCache[my_parent].requestors.clear();
             }
         }
 
