@@ -115,7 +115,8 @@ class MeshPiece : public CBase_MeshPiece {
 
     // function needed by library for quick lookup of
     // vertices location
-    static std::pair<int,int> getLocationFromID(long int vid);
+    // uint64_t vertex IDs since the FoF-campaign API change (types.h)
+    static std::pair<int,uint64_t> getLocationFromID(uint64_t vid);
         
     void initializeLibVertices() {    
         libPtr = libProxy[thisIndex].ckLocal();
@@ -170,10 +171,10 @@ class MeshPiece : public CBase_MeshPiece {
     }
 };
 
-std::pair<int,int>
-MeshPiece::getLocationFromID(long int vid) {
-    int global_y = vid % MESH_SIZE;
-    int global_x = (vid - global_y)/MESH_SIZE;
+std::pair<int,uint64_t>
+MeshPiece::getLocationFromID(uint64_t vid) {
+    int global_y = (int)(vid % MESH_SIZE);
+    int global_x = (int)((vid - global_y)/MESH_SIZE);
 
     int local_x = global_x % MESHPIECE_SIZE;
     int local_y = global_y % MESHPIECE_SIZE;

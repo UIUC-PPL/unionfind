@@ -1,6 +1,6 @@
 mainmodule random
 {
-    extern module UnionFindLib;
+    extern module unionFindLib;
 
     readonly CProxy_UnionFindLib libProxy;
     readonly CProxy_Main mainProxy;
