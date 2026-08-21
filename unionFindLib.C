@@ -723,55 +723,52 @@ find_components(CkCallback cb) {
     // Stale entries from a previous labeling run would serve wrong labels
     // (the cache is consulted before any request is sent).
     parentCache.clear();
-    // count local numBosses (forEachVertex: dense = whole array, lazy =
-    // touched vertices only — untouched ids are implicitly their own
-    // components and are not counted here; see the lazy-mode semantics note)
+    // SELF-NAMING (2026-08-21; the prefix stage is REMOVED). A boss's
+    // globally-unique vertexID IS its component label: no global
+    // coordination is needed before labeling begins, so the prefix's
+    // collective-plus-barrier — which gated every element's labeling on
+    // the slowest element's boss count — is gone. Labels are therefore
+    // sparse 64-bit ids rather than dense serials 0..C-1; every consumer
+    // in this library keys componentNumber through maps (never arrays),
+    // and the fof3 harness canonicalizes labels per group anyway. Dense
+    // numbering can be reconstructed by any caller that wants it from
+    // the count below. This also makes the labeling wave re-runnable
+    // MID-STREAM as a global path-compression pass (design:
+    // paratreet2 design/uf2-compression-wave.md), which dense per-run
+    // serials never could — the component count is not stable until
+    // quiescence, but a boss's own id always names it.
+    // Count and self-label local bosses in one pass.
     myLocalNumBosses = 0;
     forEachVertex([&](unionFindVertex& vtx, uint64_t) {
 #ifndef ANCHOR_ALGO
-        if (vtx.parent == -1)
+        if (vtx.parent == -1) {
 #else
-        // for Anchor algo, each vertex is ititially the parent of itself
-        if ((uint64_t)vtx.parent == vtx.vertexID)
+        // for Anchor algo, each vertex is initially the parent of itself
+        if ((uint64_t)vtx.parent == vtx.vertexID) {
 #endif
+            vtx.componentNumber = (long int)vtx.vertexID;
             myLocalNumBosses += 1;
+        }
     });
 
-    // send local count to prefix library
-    CkCallback doneCb(CkReductionTarget(UnionFindLib, boss_count_prefix_done), thisProxy);
-    prefixLibArray[thisIndex].startPrefixCalculation(myLocalNumBosses, doneCb);
+    // The total (the "Number of components" answer) is a plain sum
+    // reduction — it OVERLAPS the labeling cascade below instead of
+    // gating it. Delivered to every element so totalNumBosses stays
+    // valid for the pruning/count-map paths.
+    CkCallback doneCb(CkReductionTarget(UnionFindLib, component_count_done), thisProxy);
+    contribute(sizeof(int), &myLocalNumBosses, CkReduction::sum_int, doneCb);
+
+    // start the labeling phase immediately — nothing global to wait for
+    start_component_labeling();
 }
 
-// Recveive total boss count from prefix library and start labelling phase
+// Sum-reduction of local boss counts: the component total, for the
+// answer line and the pruning paths. Purely informational; labeling
+// neither waits for nor reads it.
 void UnionFindLib::
-boss_count_prefix_done(int totalCount) {
+component_count_done(int totalCount) {
     totalNumBosses = totalCount;
     if(thisIndex==0) CkPrintf("Number of components found: %d\n", totalNumBosses);
-    // access value from prefix lib elem to find starting index
-    Prefix* myPrefixElem = prefixLibArray[thisIndex].ckLocal();
-    int v = myPrefixElem->getValue();
-    int myStartIndex = v - myLocalNumBosses;
-    CkAssert(myStartIndex >= 0);
-
-    // start labeling my local bosses from myStartIndex
-    // ensures sequential numbering of components
-    if (myLocalNumBosses != 0) {
-        forEachVertex([&](unionFindVertex& vtx, uint64_t) {
-#ifndef ANCHOR_ALGO
-            if (vtx.parent == -1) {
-#else
-            if ((uint64_t)vtx.parent == vtx.vertexID) {
-#endif
-                vtx.componentNumber = myStartIndex;
-                myStartIndex++;
-            }
-        });
-    }
-
-    CkAssert(myStartIndex == v);
-
-    // start the labeling phase for all vertices
-    start_component_labeling();
 }
 
 void UnionFindLib::

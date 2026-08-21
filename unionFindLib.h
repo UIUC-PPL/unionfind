@@ -212,7 +212,7 @@ class UnionFindLib : public CBase_UnionFindLib {
 
     public:
     void find_components(CkCallback cb);
-    void boss_count_prefix_done(int totalCount);
+    void component_count_done(int totalCount);
     void start_component_labeling();
     void insertDataNeedBoss(const needBossData & data);
     void insertDataNeedBossBatch(const std::vector<needBossData>& batch);
