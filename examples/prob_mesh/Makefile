@@ -3,7 +3,7 @@ include ../../Makefile.common
 all: mesh
 
 mesh: mesh.o
-	$(CHARMC) ${LD_OPTS} -o $@ mesh.o ${UNION_FIND_LIBS}
+	$(CHARMC) ${LD_OPTS} -o $@ mesh.o ${UNION_FIND_LIBS} -tracemode projections
 
 mesh.o : mesh.C mesh.decl.h mesh.def.h
 	$(CHARMC) -c ${OPTS} ${UNION_FIND_INC} mesh.C

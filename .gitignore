@@ -5,9 +5,15 @@
 *.decl.h
 *.def.h
 
+#ignore projections traces
+*.projrc
+*.sts
+*.log.gz
+
 #ignore executables
 charmrun
 *.swp
+examples/simple_graph/graphs/pdb2graph/pdb2graph
 
 #ignore macOS specific files
 .DS_STORE

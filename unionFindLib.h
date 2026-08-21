@@ -2,19 +2,39 @@
 #define UNION_FIND_LIB
 
 #include "unionFindLib.decl.h"
+#include <unordered_map>
+
+#ifdef AGGREGATION
+// htram is only pulled in when compiled with aggregation; htram-off clients
+// can include this header with no htram header / -DUNIONFIND / include path.
 #include <NDMeshStreamer.h>
+#include "htram_group.h"
+
+//tram
+using tram_proxy_t = CProxy_HTram;
+using tram_t = HTram;
+
+extern tram_proxy_t tram_proxy;
+#endif
+/*readonly*/ extern CProxy_UnionFindLib _UfLibProxy;
 
 struct unionFindVertex {
-    long int vertexID;
-    long int parent;
+    uint64_t vertexID;
+    int64_t parent;
+    int64_t process_tip; //used during path compression to store the last node local vertex on the path to the root
     long int componentNumber = -1;
-    std::vector<long int> need_boss_requests; //request queue for processing need_boss requests
+    int64_t componentSize = -1;
+    int64_t size = 1;
+    std::vector<uint64_t> need_boss_requests; //request queue for processing need_boss requests
     long int findOrAnchorCount = 0;
 
     void pup(PUP::er &p) {
         p|vertexID;
         p|parent;
+        p|process_tip;
         p|componentNumber;
+        p|componentSize;
+        p|size;
         p|need_boss_requests;
     }
 };
@@ -29,6 +49,19 @@ struct componentCountMap {
     }
 };
 
+typedef struct componentCacheEntry {
+    long int compNum = -1; // -1 = pending (no label yet); entry creation
+                           // relies on this default (start_component_labeling)
+    int64_t compSize = -1;
+    std::vector<long int> requestors;
+
+    void pup(PUP::er &p) {
+        p|compNum;
+        p|compSize;
+        p|requestors;
+    }
+} cacheEntry;
+
 
 /* global variables */
 /*readonly*/ extern CkGroupID libGroupID;
@@ -41,31 +74,139 @@ class UnionFindLib : public CBase_UnionFindLib {
     int numMyVertices;
     int pathCompressionThreshold = 5;
     int componentPruneThreshold;
-    std::pair<int, int> (*getLocationFromID)(long int vid);
+    std::pair<int, uint64_t> (*getLocationFromID)(uint64_t vid);
     int myLocalNumBosses;
     int totalNumBosses;
     CkCallback postComponentLabelingCb;
+    CkCallback postPruningCb;
+    std::unordered_map<long int, cacheEntry> parentCache; //maps vertex numbers to component numbers
+#ifdef AGGREGATION
+    // htram state, only present when compiled with aggregation
+    tram_t* tram;
+    tram_proxy_t myTramProxy;
+#endif
 
     public:
-    UnionFindLib() {}
+    UnionFindLib() : myVertices(nullptr), numMyVertices(0) {}
     UnionFindLib(CkMigrateMessage *m) { }
+    void pup(PUP::er &p) {
+        CBase_UnionFindLib::pup(p);
+#ifdef AGGREGATION
+        p | myTramProxy; // htram proxy only exists under aggregation
+#endif
+    }
+    void ckJustMigrated() {
+#ifdef AGGREGATION
+        tram = myTramProxy.ckLocalBranch();
+#endif
+        CBase_UnionFindLib::ckJustMigrated();
+    }
+    // ---- Lazy vertex storage (sparse-uf2 design, 2026-07-25) ----
+    // In lazy mode there is no pre-initialized vertex array: a vertex record
+    // is created in lazy_store the first time a message references its local
+    // id. Right for clients whose id space is huge but sparsely touched
+    // (fragment-level FoF: ~66k of 23.7M at 80M). Dense mode (the array) is
+    // unchanged and remains right for mostly-touched id spaces. The client
+    // must register makeVertexID (the inverse of getLocationFromID) so a
+    // lazily created vertex can reconstruct its full id from (chare, local).
+    bool lazy_mode = false;
+    std::unordered_map<uint64_t, unionFindVertex> lazy_store;
+    uint64_t (*makeVertexID)(int chareIdx, uint64_t localId) = nullptr;
+    void enableLazyMode();
+    void registerMakeVertexID(uint64_t (*fn)(int, uint64_t)) { makeVertexID = fn; }
+    unionFindVertex* vertexAt(uint64_t idx) {
+        if (!lazy_mode) return &myVertices[idx];
+        auto it = lazy_store.find(idx);
+        if (it == lazy_store.end()) {
+            unionFindVertex v;
+            v.vertexID = makeVertexID(this->thisIndex, idx);
+            v.parent = -1;
+            v.process_tip = -1;
+            it = lazy_store.emplace(idx, std::move(v)).first;
+        }
+        return &it->second;
+    }
+    // Iterate every EXISTING vertex (dense: the whole array; lazy: touched
+    // only). f(vertex&, localId).
+    template <typename F> void forEachVertex(F&& f) {
+        if (lazy_mode) {
+            for (auto& kv : lazy_store) f(kv.second, kv.first);
+        } else {
+            for (int64_t i = 0; i < numMyVertices; i++) f(myVertices[i], (uint64_t)i);
+        }
+    }
+    // Lazy-mode label readback: localId -> componentNumber of every touched
+    // vertex (plain method, call via ckLocal on the element's home PE).
+    void collectComponentLabels(std::unordered_map<uint64_t, long>& out) {
+        for (auto& kv : lazy_store) out[kv.first] = kv.second.componentNumber;
+    }
+    // -------------------------------------------------------------
+
+    void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CkCallback ready);
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
+    // Client-facing API addition: one library chare per PROCESS, element i on
+    // the first PE of node i (explicit insertion — NOT an array map; a
+    // freshly created map group races with array construction on runtimes
+    // without group-dependency buffering, e.g. reconverse). `ready` fires
+    // (array reduction) once every element has been constructed and wired,
+    // so the caller may safely follow with broadcasts.
+    static CProxy_UnionFindLib unionFindInitOnePerNode(const CkCallback& ready);
+    // Race-safe form: `node_map` must be a UFNodeMap group the CALLER created
+    // EARLY (with any barrier between its ckNew and this call), so its
+    // branches exist on every process before the array construction that
+    // consults it. Required on runtimes without group-dependency buffering
+    // (reconverse): the one-argument form above creates the map inline and
+    // can abort with "Local branch of array map is NULL!" at scale.
+    static CProxy_UnionFindLib unionFindInitOnePerNode(const CkCallback& ready,
+                                                       CProxy_UFNodeMap node_map);
+    // Lazy-mode variant: same placement, but elements use lazy vertex
+    // storage (enableLazyMode broadcast before ready fires).
+    static CProxy_UnionFindLib unionFindInitOnePerNodeLazy(const CkCallback& ready,
+                                                           CProxy_UFNodeMap node_map);
+#ifdef AGGREGATION
+    void set_tram_proxy(tram_proxy_t proxy); // htram wiring, aggregation only
+#endif
+    void registerGetLocationFromID(std::pair<int, uint64_t> (*gloc)(uint64_t vid));
     void register_phase_one_cb(CkCallback cb);
     void initialize_vertices(unionFindVertex *appVertices, int numVertices);
+    uint64_t get_parent(uint64_t vertexID);
 #ifndef ANCHOR_ALGO
-    void union_request(long int vid1, long int vid2);
-    void find_boss1(int arrIdx, long int partnerID, long int senderID);
-    void find_boss2(int arrIdx, long int boss1ID, long int senderID);
+    static void insertDataCaller(void *p, findBossData data) {
+        UnionFindLib *lib = _UfLibProxy[data.targetChareIdx].ckLocal();
+         if (lib != nullptr)
+            lib->insertDataFindBoss(data);
+        else //this fallback will undo aggregation and do a send
+            _UfLibProxy[data.targetChareIdx].insertDataFindBoss(data);
+    }
+    void boss_send(int chare_index, findBossData data); //sends during boss finding, with or without aggregation
+    void union_request(uint64_t vid1, uint64_t vid2);
+    void find_boss1(uint64_t arrIdx, uint64_t partnerID, uint64_t senderID);
+    void find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID);
 #else
-    void union_request(long int v, long int w);
-    void anchor(int w_arrIdx, long int v, long int path_base_arrIdx);
+    static void insertDataCaller(void *p, anchorData data) {
+        UnionFindLib *lib = _UfLibProxy[data.targetChareIdx].ckLocal();
+        if (lib != nullptr) {
+            lib->insertDataAnchor(data);
+        } else {
+            _UfLibProxy[data.targetChareIdx].insertDataAnchor(data);
+        }
+    }
+    void anchor_send(int chare_index, anchorData data); //sends during anchoring, with or without aggregation
+    void union_request(uint64_t v, uint64_t w);
+    void anchor(uint64_t w_arrIdx, uint64_t v, long int path_base_arrIdx);
 #endif
-    void local_path_compression(unionFindVertex *src, long int compressedParent);
-    bool check_same_chares(long int v1, long int v2);
+    // client-facing API addition: batched union requests (one message per PE).
+    // Placed outside the ANCHOR_ALGO guard: both algo variants provide a
+    // two-arg union_request that this wraps.
+    void union_requests(const std::vector<UFEdge>& edges);
+    void flush_buffers();
+    void quiesce(CkCallback cb);
+    void local_union(uint64_t vid1, uint64_t vid2);
+    void local_path_compression(unionFindVertex *src, uint64_t compressedParent);
+    bool check_same_chares(uint64_t v1, uint64_t v2);
     void short_circuit_parent(shortCircuitData scd);
-    void compress_path(int arrIdx, long int compressedParent);
-    unionFindVertex* return_vertices();
-    void registerGetLocationFromID(std::pair<int, int> (*gloc)(long int v));
+    void compress_path(uint64_t arrIdx, uint64_t compressedParent);
+    unionFindVertex *return_vertices();
 
     // functions and data structures for finding connected components
 
@@ -73,15 +214,18 @@ class UnionFindLib : public CBase_UnionFindLib {
     void find_components(CkCallback cb);
     void boss_count_prefix_done(int totalCount);
     void start_component_labeling();
-    void insertDataNeedBoss(const uint64_t & data);
+    void insertDataNeedBoss(const needBossData & data);
+    void insertDataNeedBossBatch(const std::vector<needBossData>& batch);
     void insertDataFindBoss(const findBossData & data);
 #ifdef ANCHOR_ALGO
     void insertDataAnchor(const anchorData & data);
 #endif
-    void need_boss(int arrIdx, long int fromID);
-    void set_component(int arrIdx, long int compNum);
+    void need_boss(uint64_t arrIdx, uint64_t fromID);
+    void add_size(uint64_t arrIdx, int64_t delta);
+    void set_component(uint64_t arrIdx, long int compNum, int64_t compSize);
     void prune_components(int threshold, CkCallback appReturnCb);
     void perform_pruning();
+    void report_surviving_components(long *totalData, int numElems);
     int get_total_num_bosses() {
         return totalNumBosses;
     }
@@ -107,6 +251,17 @@ class UnionFindLibGroup : public CBase_UnionFindLibGroup {
     void increase_message_count();
     void contribute_count();
     void done_profiling(int);
+};
+
+// Client-facing API addition: array map placing element i on the first PE of
+// (SMP) node i — the one-chare-per-process layout used by
+// unionFindInitOnePerNode.
+class UFNodeMap : public CBase_UFNodeMap {
+  public:
+    UFNodeMap() {}
+    int procNum(int, const CkArrayIndex &idx) {
+        return CkNodeFirst(idx.data()[0]);
+    }
 };
 
 

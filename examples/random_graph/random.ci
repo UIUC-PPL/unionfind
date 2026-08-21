@@ -1,0 +1,18 @@
+mainmodule random
+{
+    extern module UnionFindLib;
+
+    readonly CProxy_UnionFindLib libProxy;
+    readonly CProxy_Main mainProxy;
+
+    mainchare Main
+    {
+        entry Main(CkArgMsg *m);
+    };
+
+    array [1D] TreePiece
+    {
+        entry TreePiece(int randseed);
+    };
+
+};

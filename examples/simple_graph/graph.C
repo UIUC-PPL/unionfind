@@ -14,6 +14,7 @@
 class Main : public CBase_Main {
     CProxy_TreePiece tpProxy;
     double startTime;
+    double componentDetectionStartTime;
     public:
     Main(CkArgMsg *m) {
         if (m->argc != 3) {
@@ -65,6 +66,7 @@ class Main : public CBase_Main {
     void done() {
         CkPrintf("[Main] Inverted trees constructed. Notify library to perform components detection\n");
         CkPrintf("[Main] Tree construction time: %f\n", CkWallTimer()-startTime);
+        componentDetectionStartTime = CkWallTimer();
         // callback for library to inform application after completing
         // connected components detection
         CkCallback cb(CkIndex_Main::doneFindComponents(), thisProxy);
@@ -74,10 +76,11 @@ class Main : public CBase_Main {
 
     void doneFindComponents() {
         CkPrintf("[Main] Components identified, prune unecessary ones now\n");
-        CkPrintf("[Main] Components detection time: %f\n", CkWallTimer()-startTime);
+        CkPrintf("[Main] Components detection time: %f\n", CkWallTimer()-componentDetectionStartTime);
         // callback for library to report to after pruning
-        CkCallback cb(CkIndex_TreePiece::requestVertices(), tpProxy);
-        libProxy.prune_components(1, cb);
+        CkExit();
+        //CkCallback cb(CkIndex_TreePiece::requestVertices(), tpProxy);
+        //libProxy.prune_components(1, cb);
     }
 
     void donePrinting() {
@@ -130,7 +133,7 @@ class TreePiece : public CBase_TreePiece {
     // function that must be always defined by application
     // return type -> std::pair<int, int>
     // this specific logic assumes equal distribution of vertices across all tps
-    static std::pair<int, int> getLocationFromID(long int vid);
+    static std::pair<int, uint64_t> getLocationFromID(uint64_t vid);
 
     void initializeLibVertices() {
         // provide vertices data to library
@@ -202,10 +205,12 @@ TreePiece::getLocationFromID(long int vid) {
 }
 */
 
-std::pair<int, int>
-TreePiece::getLocationFromID(long int vid) {
-    int chareIdx = (vid-1) % NUM_TREEPIECES;
-    int arrIdx = (vid-1) / NUM_TREEPIECES;
+std::pair<int, uint64_t>
+TreePiece::getLocationFromID(uint64_t vid) {
+    int target_per_chare = NUM_VERTICES/NUM_TREEPIECES;
+    int chareIdx = (vid-1) / target_per_chare;
+    if(chareIdx>=NUM_TREEPIECES) chareIdx = NUM_TREEPIECES - 1;
+    uint64_t arrIdx = (vid-1) - (uint64_t)chareIdx * target_per_chare;
     return std::make_pair(chareIdx, arrIdx);
 }
 

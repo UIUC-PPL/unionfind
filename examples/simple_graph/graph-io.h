@@ -38,11 +38,25 @@ void populateMyVertices(std::vector<proteinVertex>& myVertices, int nVertices, i
 #endif
     seekToLine(fp, lineNum);
 
+    int target_per_chare = nVertices / nChares;
+
     while (startVid <= nVertices) {
         proteinVertex v = ReadVertex(fp);
+        if((startVid-1) / target_per_chare == chareIdx)
+        {
+            myVertices.push_back(v);
+            //if(chareIdx==0) printf("Chare 0 has vertex %d\n", v.id);
+        }
+        else if((chareIdx==nChares-1)&&(((startVid-1) / target_per_chare)>=nChares))
+        {
+            myVertices.push_back(v);
+            //printf("Chare %d has vertex %d\n", chareIdx, v.id);
+        }
+        /*
         if ((startVid-1) % nChares == chareIdx) {
             myVertices.push_back(v);
         }
+            */
 
         startVid++;
     }

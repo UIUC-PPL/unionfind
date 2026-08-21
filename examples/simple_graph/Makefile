@@ -3,7 +3,7 @@ include ../../Makefile.common
 all: graph
 
 graph: graph.o
-	$(CHARMC) ${LD_OPTS} -o $@ graph.o ${UNION_FIND_LIBS}
+	$(CHARMC) ${LD_OPTS} -o $@ graph.o ${UNION_FIND_LIBS} -tracemode projections
 
 graph.o : graph.C graph-io.h graph.decl.h graph.def.h
 	$(CHARMC) -c ${OPTS} ${UNION_FIND_INC} graph.C

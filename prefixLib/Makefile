@@ -1,9 +1,9 @@
-CHARMC=/Users/raghu/work/charm/charm/bin/charmc $(OPTS)
+include ../Makefile.common
 
 all: libprefix.a
 
 libprefix.a: prefixBalance.o
-	$(CHARMC) prefixBalance.o -o libprefix.a -language charm++
+	$(CHARMC) prefixBalance.o -o libprefix.a -language charm++ # -DCK_TEMPLATES_ONLY
 
 prefixBalance.o : prefixBalance.C prefixBalance.def.h prefixBalance.decl.h
 	$(CHARMC) -c prefixBalance.C

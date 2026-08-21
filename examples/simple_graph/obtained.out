@@ -1,0 +1,22 @@
+Charmrun> scalable start enabled. 
+Charmrun> started all node programs in 0.013 seconds.
+Charm++> Running in SMP mode: 3 processes, 1 worker threads (PEs) + 1 comm threads per process, 3 PEs total
+Charm++> The comm. thread both sends and receives messages
+Converse/Charm++ Commit ID: v8.0.1-devel-36-g3c3086b33
+Charm++: Tracemode Projections enabled.
+Trace: traceroot: ./graph
+Isomalloc> Synchronized global address space.
+Charm++> scheduler running in netpoll mode.
+CharmLB> Load balancer assumes all CPUs are same.
+Charm++> Running on 1 hosts (1 sockets x 8 cores x 1 PUs = 8-way SMP)
+Charm++> cpu topology info is gathered in 0.009 seconds.
+CharmLB> Load balancing instrumentation for communication is off.
+Aggregation type: WsP with buffer size 2048
+UnionFindLib: Compiled with aggregation optimizations
+[Main] Library array with 3 chares created and proxy obtained
+[Main] Inverted trees constructed. Notify library to perform components detection
+[Main] Tree construction time: 0.034301
+Number of components found: 3
+[Main] Components identified, prune unecessary ones now
+[Main] Components detection time: 0.052030
+[Partition 0][Node 0] End of program

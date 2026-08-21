@@ -1,13 +1,25 @@
 #set the following variables to absolute paths
-CHARM_DIR = /Users/raghu/work/charm/charm
-UNION_FIND_DIR = /Users/raghu/work/charm/unionFind/unionFind
+PARENT_DIR = $(HOME)
+CHARM_DIR = $(PARENT_DIR)/charm_reconverse
+UNION_FIND_DIR = $(PARENT_DIR)/unionfind
 PREFIX_LIB_DIR = $(UNION_FIND_DIR)/prefixLib
+HTRAM_LIB_DIR = $(PARENT_DIR)/htram
 
 #charmc options
-ANCHOR= -DANCHOR_ALGO
-#ANCHOR= 
+#ANCHOR= -DANCHOR_ALGO
+ANCHOR= 
 PROFILE= -DPROFILING
-CHARMC = $(CHARM_DIR)/bin/charmc $(ANCHOR) $(PROFILE)
+# htram aggregation: DEFAULT OFF (2026-07-27 measurement, 80M at 480 PEs:
+# aggregation cost 1-2.4 s of the union-find phase while carrying only 22k
+# edges — tram group creation + per-destination buffers scale with PE
+# count). Turn on for multi-billion-particle / very-high-edge-count runs:
+#   make AGGREGATION=-DAGGREGATION
+# ABI: this flag changes unionFindLib.h's class layout; the CLIENT build
+# (e.g. paratreet2) must use the SAME setting, and both need make clean.
+AGGREGATION =
+#for datatype declaration
+UNIONFIND= -DUNIONFIND
+CHARMC = $(CHARM_DIR)/bin/charmc $(ANCHOR) $(PROFILE) $(UNIONFIND) $(AGGREGATION)
 OPTS = -std=c++11 -O3 -g
 LD_OPTS =
 
@@ -15,5 +27,8 @@ LD_OPTS =
 PREFIX_LIBS = -L${PREFIX_LIB_DIR} -lprefix
 PREFIX_INC = -I${PREFIX_LIB_DIR}
 
-UNION_FIND_LIBS = -L${UNION_FIND_DIR} -lunionFind ${PREFIX_LIBS}
-UNION_FIND_INC = -I${UNION_FIND_DIR} ${PREFIX_INC}
+HTRAM_LIBS = -L${HTRAM_LIB_DIR} -lhtram_group_unionfind
+HTRAM_INC = -I${HTRAM_LIB_DIR}
+
+UNION_FIND_LIBS = -L${UNION_FIND_DIR} -lunionFind ${PREFIX_LIBS} ${HTRAM_LIBS}
+UNION_FIND_INC = -I${UNION_FIND_DIR} ${PREFIX_INC} ${HTRAM_INC}
