@@ -157,6 +157,43 @@ void UnionFindLib::boss_send(int chare_index, findBossData data) {
     #endif
 }
 
+// relay78: Kale's backward short-circuit. When a find chain is about to
+// LEAVE this chare, tell the sender to point straight at where we are going.
+// The mechanism was already written and commented out at both call sites;
+// this only gates it on an env knob so both arms run from one binary.
+static bool shortCircuitEnabled() {
+    static const bool on = [] {
+        const char* e = getenv("FOF_UF_SHORTCIRCUIT");
+        return e && atoi(e) != 0;
+    }();
+    return on;
+}
+
+static const char* UFS_NAMES[] = {
+    "fb1_root", "fb1_climb_remote", "fb1_climb_local",
+    "fb2_climb_remote", "fb2_climb_local",
+    "fb2_UNION", "fb2_SAMEROOT_discard", "fb2_flip",
+    "addsize_root", "addsize_forward", "local_union",
+    "sc_sent", "sc_applied", "sc_rejected_stale", "addsize_SKIPPED" };
+
+// relay79: the union-find `size` field is DEAD in FoF3 -- the app seeds it,
+// the library maintains it through add_size, set_component propagates it, and
+// then collectComponentLabels reads componentNumber ONLY (unionFindLib.h:146).
+// componentSize appears once in the app, as "= -1", and is never read; the
+// app derives every size and max_size from the LABELS at the end
+// (depositLabelCounts -> histogramShard -> collectTouchedCounts).  The
+// size-consuming path here (merge_count_results) is inside #if 0.
+// FOF_UF_SIZES=0 skips the add_size calls.  Default 1 = unchanged behaviour.
+// If the analysis is right, the EXACT gate (components AND max_size) is
+// untouched by this knob -- that gate is the test.
+static bool sizesEnabled() {
+    static const bool on = [] {
+        const char* e = getenv("FOF_UF_SIZES");
+        return e ? (atoi(e) != 0) : true;
+    }();
+    return on;
+}
+
 void UnionFindLib::
 union_request(uint64_t vid1, uint64_t vid2) {
     assert(vid1!=vid2);
@@ -172,6 +209,7 @@ union_request(uint64_t vid1, uint64_t vid2) {
     // Fast path: both vertices are on this chare — skip the find_boss protocol
     // entirely and do a local sequential union with full path compression.
     if (vid1_loc.first == this->thisIndex && vid2_loc.first == this->thisIndex) {
+        ufs_[10]++;
         local_union(vid1, vid2);
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         #ifdef PROFILING
@@ -258,6 +296,7 @@ find_boss1(uint64_t arrIdx, uint64_t partnerID, uint64_t senderID) {
     src->findOrAnchorCount++;
 
     if (src->parent == -1) {
+        ufs_[0]++;
         //boss1 found
         std::pair<int, uint64_t> partner_loc = getLocationFromID(partnerID);
         //message the chare containing the partner
@@ -303,6 +342,7 @@ find_boss1(uint64_t arrIdx, uint64_t partnerID, uint64_t senderID) {
         */
         while (parent_loc.first == this->thisIndex) {
             parent = vertexAt(parent_loc.second);
+            ufs_[2]++;
 
             // entire tree is local to chare
             if (parent->parent ==  -1) {
@@ -339,20 +379,23 @@ find_boss1(uint64_t arrIdx, uint64_t partnerID, uint64_t senderID) {
         d.senderID = curr->vertexID;
         d.isFBOne = 1;
         //remote message to continue boss1 find
+        ufs_[1]++;
         boss_send(parent_loc.first, d);
 
-        /*
-        // check if sender and current vertex are on different chares
-        if (senderID != -1 && !check_same_chares(senderID, curr->vertexID)) {
-            // short circuit the sender to point to grandparent
-            std::pair<int,int> sender_loc = getLocationFromID(senderID);
+        // relay78 (Kale, 2026-08-22): we are leaving this chare continuing the
+        // SAME chain, so tell the sender to skip straight to where we go.
+        // NOTE the pair type: the commented original used std::pair<int,int>,
+        // which truncates a 64-bit local index. The race Kale named is handled
+        // in short_circuit_parent by a monotone guard, not by an epoch.
+        if (shortCircuitEnabled() && senderID != (uint64_t)-1 &&
+            !check_same_chares(senderID, curr->vertexID)) {
+            std::pair<int, uint64_t> sender_loc = getLocationFromID(senderID);
             shortCircuitData scd;
             scd.arrIdx = sender_loc.second;
             scd.grandparentID = curr->parent;
-            //send to path compress across chares
+            ufs_[11]++;
             thisProxy[sender_loc.first].short_circuit_parent(scd);
         }
-            */
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         #ifdef PROFILING
@@ -370,19 +413,24 @@ find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
 
     if (src->parent == -1) {
         if (boss1ID > src->vertexID) {
+            ufs_[7]++;
             //do not point to somebody greater than you, min-heap property (mostly a cycle edge?)
             union_request(boss1ID, src->vertexID); // flipped and reprocessed
         }
         else {
             //valid edge
+            if (boss1ID == src->vertexID) ufs_[6]++;   // SAME ROOT: discarded
             if (boss1ID != src->vertexID) {//avoid self-loop
+                ufs_[5]++;                            // real union
                 // propagate size to new root before setting parent
-                std::pair<int,int> boss1_loc = getLocationFromID(boss1ID);
-                if (boss1_loc.first == thisIndex) {
-                    add_size(boss1_loc.second, src->size);
-                } else {
-                    thisProxy[boss1_loc.first].add_size(boss1_loc.second, src->size);
-                }
+                if (sizesEnabled()) {
+                    std::pair<int,int> boss1_loc = getLocationFromID(boss1ID);
+                    if (boss1_loc.first == thisIndex) {
+                        add_size(boss1_loc.second, src->size);
+                    } else {
+                        thisProxy[boss1_loc.first].add_size(boss1_loc.second, src->size);
+                    }
+                } else ufs_[14]++;
                 src->parent = boss1ID;
                 wave_dirty_ = true;   // structural union: chain may deepen
                 //message initID to start path compression in boss2's chain
@@ -403,6 +451,7 @@ find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
         // same optimizations as in find_boss1
         while (parent_loc.first == this->thisIndex) {
             parent = vertexAt(parent_loc.second);
+            ufs_[4]++;
 
             if (parent->parent ==  -1) {
                 local_path_compression(path_base, parent->vertexID);
@@ -438,21 +487,19 @@ find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
         d.senderID = curr->vertexID;
         d.isFBOne = 0;
         //remote message to continue boss2 find
+        ufs_[3]++;
         boss_send(parent_loc.first, d);
 
-        /*
-        // check if sender and current vertex are on different chares
-        if (senderID != -1 && !check_same_chares(senderID, curr->vertexID)) {
-            // short circuit the sender to point to grandparent
-            
-            std::pair<int,int> sender_loc = getLocationFromID(senderID);
+        // relay78: same backward short-circuit on the boss2 chain.
+        if (shortCircuitEnabled() && senderID != (uint64_t)-1 &&
+            !check_same_chares(senderID, curr->vertexID)) {
+            std::pair<int, uint64_t> sender_loc = getLocationFromID(senderID);
             shortCircuitData scd;
             scd.arrIdx = sender_loc.second;
             scd.grandparentID = curr->parent;
-            //send to path compress across chares
+            ufs_[11]++;
             thisProxy[sender_loc.first].short_circuit_parent(scd);
         }
-            */
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         #ifdef PROFILING
@@ -512,12 +559,14 @@ anchor(uint64_t w_arrIdx, uint64_t v, long int path_base_arrIdx) {
         local_path_compression(path_base, v);
       }
       // propagate size to new root before setting parent
+      if (sizesEnabled()) {
       std::pair<int,int> v_loc_size = getLocationFromID(v);
       if (v_loc_size.first == thisIndex) {
           add_size(v_loc_size.second, w->size);
       } else {
           thisProxy[v_loc_size.first].add_size(v_loc_size.second, w->size);
       }
+      } else ufs_[14]++;
       w->parent = v; //anchor algo guarantees that v will be smaller here
       wave_dirty_ = true;   // structural union: chain may deepen
     }
@@ -624,12 +673,16 @@ local_union(uint64_t vid1, uint64_t vid2) {
     }
 
     // Both paths ended at actual roots on this chare — merge directly.
+    // Size merges gated with the remote add_size flow (FOF_UF_SIZES): under
+    // the no-sizes mode the field is uniformly unmaintained, not partially.
     if (tip1 == tip2) return; // already same component
     if (tip1 < tip2) {
-        vertexAt(arrIdx(tip1))->size += vertexAt(arrIdx(tip2))->size;
+        if (sizesEnabled())
+            vertexAt(arrIdx(tip1))->size += vertexAt(arrIdx(tip2))->size;
         vertexAt(arrIdx(tip2))->parent = (int64_t)tip1;
     } else {
-        vertexAt(arrIdx(tip2))->size += vertexAt(arrIdx(tip1))->size;
+        if (sizesEnabled())
+            vertexAt(arrIdx(tip2))->size += vertexAt(arrIdx(tip1))->size;
         vertexAt(arrIdx(tip1))->parent = (int64_t)tip2;
     }
     wave_dirty_ = true;   // structural union: chain may deepen
@@ -661,7 +714,18 @@ check_same_chares(uint64_t v1, uint64_t v2) {
 void UnionFindLib::
 short_circuit_parent(shortCircuitData scd) {
     unionFindVertex *src = vertexAt(scd.arrIdx);
-    //CkPrintf("[TP %d] Short circuiting %ld from current parent %ld to grandparent %ld\n", thisIndex, src->vertexID, src->parent, grandparentID);
+    // relay78 MONOTONE GUARD for the race Kale named. Between sending the find
+    // and this answer arriving, src->parent may already have moved. In this
+    // library parent ids strictly DECREASE toward the root (find_boss2 refuses
+    // to point at a larger id -- the min-heap property), so "closer to the
+    // root" is exactly "smaller". Accepting only a strictly smaller id can
+    // never move a pointer away from the root, so no epoch or version is
+    // needed; a stale answer is simply dropped.
+    if (src->parent == -1 || (int64_t)scd.grandparentID >= src->parent) {
+        ufs_[13]++;
+        return;
+    }
+    ufs_[12]++;
     src->parent = scd.grandparentID;
     CkAssert(src->parent != src->vertexID); // TODO: remove assert
 }
@@ -693,8 +757,10 @@ add_size(uint64_t arrIdx, int64_t delta) {
     bool is_root = ((uint64_t)vertexAt(arrIdx)->parent == vertexAt(arrIdx)->vertexID);
 #endif
     if (is_root) {
+        ufs_[8]++;
         vertexAt(arrIdx)->size += delta;
     } else {
+        ufs_[9]++;
         std::pair<int,int> par_loc = getLocationFromID((uint64_t)vertexAt(arrIdx)->parent);
         if (par_loc.first == thisIndex) {
             add_size(par_loc.second, delta);
@@ -887,8 +953,29 @@ wave_set_root(uint64_t arrIdx, long rootID) {
  * @param cb Callback to be invoked after this function has finished
  */
 void UnionFindLib::
+ufstat_mark() {
+    // relay78: snapshot at the fireUF2Edges barrier. Everything counted so far
+    // is walk-concurrent; everything after it is the post-walk drain.
+    for (int i = 0; i < UFS_N; i++) ufs_mark_[i] = ufs_[i];
+}
+
+void UnionFindLib::
+ufstat_done(long *v, int n) {
+    CkPrintf("[UFSTAT] branch-outcome census, summed over the array\n");
+    for (int i = 0; i < n/2 && i < UFS_N; i++)
+        CkPrintf("[UFSTAT] %-22s walk %14ld   drain %14ld   total %14ld\n",
+                 UFS_NAMES[i], v[i], v[n/2+i] - v[i], v[n/2+i]);
+}
+
+void UnionFindLib::
 find_components(CkCallback cb) {
     wave_armed_ = false;   // stop periodic waves; the forest is final
+    {   // relay78 census: [0,UFS_N) = at the barrier, [UFS_N,2*UFS_N) = final
+        long both[2*UFS_N];
+        for (int i = 0; i < UFS_N; i++) { both[i] = ufs_mark_[i]; both[UFS_N+i] = ufs_[i]; }
+        contribute(sizeof(long)*2*UFS_N, both, CkReduction::sum_long,
+                   CkCallback(CkReductionTarget(UnionFindLib, ufstat_done), thisProxy[0]));
+    }
     postComponentLabelingCb = cb;
     // Stale entries from a previous labeling run would serve wrong labels
     // (the cache is consulted before any request is sent).
@@ -1160,6 +1247,11 @@ set_component(uint64_t arrIdx, long int compNum, int64_t compSize) {
  */
 void UnionFindLib::
 prune_components(int threshold, CkCallback appReturnCb) {
+    // Pruning is the size machinery's only consumer: it cannot work under
+    // the no-sizes mode (FOF_UF_SIZES=0), where the field is unmaintained.
+    if (!sizesEnabled())
+        CkAbort("UnionFindLib::prune_components requires FOF_UF_SIZES=1 "
+                "(size maintenance was disabled)\n");
     componentPruneThreshold = threshold;
     postPruningCb = appReturnCb;
 

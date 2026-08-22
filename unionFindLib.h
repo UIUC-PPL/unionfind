@@ -236,6 +236,16 @@ class UnionFindLib : public CBase_UnionFindLib {
     void wave_need_root_local(uint64_t arrIdx, uint64_t fromID, long& rewrote);
     void wave_apply(unionFindVertex* q, long rootID, long& rewrote);
     int wave_epoch_ = 0;
+    // relay78 INSTRUMENTATION (Kale's question, 2026-08-22: during the drain,
+    // are findBoss calls propagating, unioning, or being discarded as
+    // same-root?). Branch-outcome census, summed over the array and printed
+    // once. UFS_MARK is taken at the fireUF2Edges barrier so walk-concurrent
+    // work and the post-walk drain can be separated.
+    enum { UFS_N = 15 };
+    long ufs_[UFS_N] = {0};
+    long ufs_mark_[UFS_N] = {0};
+    void ufstat_mark();
+    void ufstat_done(long *v, int n);
     bool wave_armed_ = false;
     // Set on every STRUCTURAL union on this element (a former root gains a
     // parent) — not on compression writes. A periodic tick runs a pass only
