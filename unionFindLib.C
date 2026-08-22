@@ -708,6 +708,117 @@ return_vertices() {
     return myVertices;
 }
 
+/** Mid-stream global path compression -- the "wave" **/
+
+// Env-selected mode: 0 = off, 1 = guarded direct parent rewrites,
+// 2 = hedge (union_request instead of writing; unconditionally correct).
+static int waveMode() {
+    static const int m = [] {
+        const char* e = getenv("FOF_WAVE");
+        return e ? atoi(e) : 0;
+    }();
+    return m;
+}
+
+// One element's wave pass: every non-root touched vertex asks its
+// parent's owner for the parent's current root; roots answer
+// immediately; answers cascade down through parked requesters,
+// compressing every vertex on the way (wave_apply). Batched one message
+// per destination element, like the labeling scatter. Repeat-safe:
+// wave_epoch invalidates cached roots; a stale answer still installs a
+// then-ancestor (guarded), so overlapping waves degrade to extra
+// messages, never to wrong state.
+void UnionFindLib::
+compression_wave() {
+    if (waveMode() == 0) return;
+    wave_epoch_++;
+    long rewrote = 0;
+    std::unordered_map<int, std::vector<needBossData>> dest_buf;
+    forEachVertex([&](unionFindVertex& v, uint64_t) {
+        if (v.parent == -1) return;              // roots have nothing to learn
+        std::pair<int, uint64_t> ploc = getLocationFromID((uint64_t)v.parent);
+        needBossData d;
+        d.arrIdx = ploc.second;
+        d.senderID = v.vertexID;
+        if (ploc.first == thisIndex) {
+            wave_need_root_local(ploc.second, v.vertexID, rewrote);
+        } else {
+            dest_buf[ploc.first].push_back(d);
+        }
+    });
+    for (auto& kv : dest_buf)
+        this->thisProxy[kv.first].wave_need_root_batch(kv.second);
+    if (thisIndex == 0)
+        CkPrintf("[UnionFindLib] compression wave %d fired (mode %d); "
+                 "element 0 rewrote %ld parents locally\n",
+                 wave_epoch_, waveMode(), rewrote);
+}
+
+// Apply the wave's answer at vertex q (owner-side): q's chain leads to
+// root `rootID` (possibly stale — then rootID is still an ancestor).
+// Direct mode writes only a strict improvement on a NON-root (the two
+// rules that make concurrent unions safe: never touch a root's parent —
+// root links belong exclusively to find_boss2's still-root-checked
+// protocol — and only install a smaller ancestor, preserving the
+// parent<child invariant). The impossible-by-design cases fall through
+// to the hedge, which is correct in every state.
+void UnionFindLib::
+wave_apply(unionFindVertex* q, long rootID, long& rewrote) {
+    if ((uint64_t)rootID == q->vertexID) return;
+    if (waveMode() == 2 || q->parent == -1) {
+        union_request((uint64_t)rootID, q->vertexID);
+    } else if (rootID < q->parent) {
+        q->parent = rootID;
+        rewrote++;
+    }
+    q->wave_root = rootID;
+    q->wave_epoch = wave_epoch_;
+    // Drain requesters parked on q: they get q's root (full compression).
+    std::vector<uint64_t> parked;
+    parked.swap(q->wave_parked);
+    for (uint64_t f : parked) {
+        std::pair<int, uint64_t> floc = getLocationFromID(f);
+        if (floc.first == thisIndex)
+            wave_apply(vertexAt(floc.second), rootID, rewrote);
+        else
+            this->thisProxy[floc.first].wave_set_root(floc.second, rootID);
+    }
+}
+
+// A requester (fromID) wants the root above local vertex p.
+void UnionFindLib::
+wave_need_root_local(uint64_t arrIdx, uint64_t fromID, long& rewrote) {
+    unionFindVertex* p = vertexAt(arrIdx);
+    long root = -1;
+    if (p->parent == -1) root = (long)p->vertexID;         // p IS the root
+    else if (p->wave_epoch == wave_epoch_) root = p->wave_root; // cached
+    if (root != -1) {
+        std::pair<int, uint64_t> floc = getLocationFromID(fromID);
+        if (floc.first == thisIndex)
+            wave_apply(vertexAt(floc.second), root, rewrote);
+        else
+            this->thisProxy[floc.first].wave_set_root(floc.second, root);
+    } else {
+        // p does not know yet; park. p's own request was (or will be)
+        // sent by its element's pass — every element receives the wave
+        // broadcast — so this entry is always eventually drained.
+        p->wave_parked.push_back(fromID);
+    }
+}
+
+void UnionFindLib::
+wave_need_root_batch(const std::vector<needBossData>& batch) {
+    long rewrote = 0;
+    for (const needBossData& d : batch)
+        wave_need_root_local(d.arrIdx, d.senderID, rewrote);
+}
+
+void UnionFindLib::
+wave_set_root(uint64_t arrIdx, long rootID) {
+    long rewrote = 0;
+    wave_apply(vertexAt(arrIdx), rootID, rewrote);
+}
+
 /** Functions for finding connected components **/
 
 /**
@@ -776,7 +887,18 @@ find_components(CkCallback cb) {
 void UnionFindLib::
 component_count_done(int totalCount) {
     totalNumBosses = totalCount;
-    if(thisIndex==0) CkPrintf("Number of components found: %d\n", totalNumBosses);
+    // In lazy mode only TOUCHED vertices exist, so this total is the
+    // cross-process (edge-touched) component count, not the app's final
+    // component count — say so (rename rider, Kale 2026-08-21). Dense
+    // mode keeps the historical string: every vertex is registered there,
+    // the count IS the total, and the standalone harnesses grep for it.
+    if (thisIndex == 0) {
+        if (lazy_mode)
+            CkPrintf("UF_2 cross-process (touched) components: %d\n",
+                     totalNumBosses);
+        else
+            CkPrintf("Number of components found: %d\n", totalNumBosses);
+    }
 }
 
 void UnionFindLib::

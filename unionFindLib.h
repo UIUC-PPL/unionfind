@@ -27,6 +27,12 @@ struct unionFindVertex {
     int64_t size = 1;
     std::vector<uint64_t> need_boss_requests; //request queue for processing need_boss requests
     long int findOrAnchorCount = 0;
+    // Compression-wave state (transient, never pup'd): the root this
+    // vertex learned in wave epoch `wave_epoch`, and requesters parked
+    // here awaiting it. See compression_wave() in unionFindLib.C.
+    long wave_root = -1;
+    int wave_epoch = -1;
+    std::vector<uint64_t> wave_parked;
 
     void pup(PUP::er &p) {
         p|vertexID;
@@ -212,6 +218,21 @@ class UnionFindLib : public CBase_UnionFindLib {
 
     public:
     void find_components(CkCallback cb);
+    // Mid-stream global path compression (the "wave", design:
+    // paratreet2 design/uf2-compression-wave rationale, 2026-08-21).
+    // Safe to fire at ANY time, any number of times, concurrently with
+    // ongoing unions: writes are owner-side, never touch roots, and only
+    // ever install a smaller ancestor (the min-heap invariant). Modes via
+    // FOF_WAVE: 0 off, 1 guarded direct writes, 2 hedge (re-issue
+    // union_request instead of writing — unconditionally correct, the
+    // validation arm). No completion callback: the message cascade drains
+    // into whatever QD follows.
+    void compression_wave();
+    void wave_need_root_batch(const std::vector<needBossData>& batch);
+    void wave_set_root(uint64_t arrIdx, long rootID);
+    void wave_need_root_local(uint64_t arrIdx, uint64_t fromID, long& rewrote);
+    void wave_apply(unionFindVertex* q, long rootID, long& rewrote);
+    int wave_epoch_ = 0;
     void component_count_done(int totalCount);
     void start_component_labeling();
     void insertDataNeedBoss(const needBossData & data);
