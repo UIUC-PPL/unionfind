@@ -47,7 +47,7 @@ module unionFindLib {
         entry [reductiontarget] void component_count_done(int totalCount);
         entry void need_boss(uint64_t arrIdx, uint64_t fromID);
         entry void add_size(uint64_t arrIdx, long delta);
-        entry void set_component(uint64_t arrIdx, int compNum, long compSize);
+        entry void set_component(uint64_t arrIdx, long compNum, long compSize);
 
         // functions to prune out small components
         entry void prune_components(int threshold, CkCallback cb);

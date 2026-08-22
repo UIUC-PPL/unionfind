@@ -758,7 +758,15 @@ find_components(CkCallback cb) {
     CkCallback doneCb(CkReductionTarget(UnionFindLib, component_count_done), thisProxy);
     contribute(sizeof(int), &myLocalNumBosses, CkReduction::sum_int, doneCb);
 
-    // start the labeling phase immediately — nothing global to wait for
+    // start the labeling phase immediately — nothing global to wait for.
+    // (An ordering race here was suspected during the 2026-08-21 under-merge
+    // hunt and DISPROVEN: gating labeling on the count reduction reproduced
+    // the identical failure. The actual bug was set_component's .ci entry
+    // marshalling compNum as int — 32-bit truncation of vertexID-valued
+    // labels on every REMOTE delivery, while local deliveries kept 64 bits.
+    // Dormant for years under dense serials < 2^31; fatal under
+    // self-naming. If label corruption ever recurs, check ENTRY SIGNATURE
+    // WIDTHS against the .h first.)
     start_component_labeling();
 }
 
