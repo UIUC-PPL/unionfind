@@ -194,6 +194,21 @@ static bool sizesEnabled() {
     return on;
 }
 
+// Measurement arm for the sharding question (Kale, 2026-08-22): what do
+// within-process chains look like when nobody shortens them? FOF_UF_LOCALCOMP=0
+// disables the find-path local_path_compression calls (correctness unaffected;
+// compression is an optimization). Together with the climb-hop histogram this
+// bounds from above the intra-process message volume a sharded (per-treepiece /
+// per-PE) element design would pay, since today's chain lengths are measured
+// WITH compression on and are therefore a lower bound.
+static bool localCompEnabled() {
+    static const bool on = [] {
+        const char* e = getenv("FOF_UF_LOCALCOMP");
+        return e ? (atoi(e) != 0) : true;
+    }();
+    return on;
+}
+
 void UnionFindLib::
 union_request(uint64_t vid1, uint64_t vid2) {
     assert(vid1!=vid2);
@@ -340,13 +355,16 @@ find_boss1(uint64_t arrIdx, uint64_t partnerID, uint64_t senderID) {
            We combine this with a local path compression optimization to make
            all local trees completely shallow
         */
+        long climb_steps = 0;
         while (parent_loc.first == this->thisIndex) {
             parent = vertexAt(parent_loc.second);
-            ufs_[2]++;
+            ufs_[2]++; climb_steps++;
 
             // entire tree is local to chare
             if (parent->parent ==  -1) {
-                local_path_compression(path_base, parent->vertexID);
+                if (localCompEnabled())
+                    local_path_compression(path_base, parent->vertexID);
+                ufh_note(climb_steps);
 
                 findBossData d;
                 d.arrIdx = parent_loc.second;
@@ -362,8 +380,9 @@ find_boss1(uint64_t arrIdx, uint64_t partnerID, uint64_t senderID) {
             curr = parent;
             parent_loc = getLocationFromID(curr->parent);
         } //end of local tree climbing
+        ufh_note(climb_steps);
 
-        if (path_base->vertexID != curr->vertexID) {
+        if (localCompEnabled() && path_base->vertexID != curr->vertexID) {
             local_path_compression(path_base, curr->vertexID);
         }
         else {
@@ -449,12 +468,15 @@ find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
         unionFindVertex *parent, *curr = src;
 
         // same optimizations as in find_boss1
+        long climb_steps = 0;
         while (parent_loc.first == this->thisIndex) {
             parent = vertexAt(parent_loc.second);
-            ufs_[4]++;
+            ufs_[4]++; climb_steps++;
 
             if (parent->parent ==  -1) {
-                local_path_compression(path_base, parent->vertexID);
+                if (localCompEnabled())
+                    local_path_compression(path_base, parent->vertexID);
+                ufh_note(climb_steps);
 
                 // find_boss2(parent_loc.second, boss1ID, initID);
                 findBossData d;
@@ -470,8 +492,9 @@ find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
             curr = parent;
             parent_loc = getLocationFromID(curr->parent);
         } //end of local tree climbing
+        ufh_note(climb_steps);
 
-        if (path_base->vertexID != curr->vertexID) {
+        if (localCompEnabled() && path_base->vertexID != curr->vertexID) {
             local_path_compression(path_base, curr->vertexID);
         }
         else {
@@ -962,18 +985,30 @@ ufstat_mark() {
 void UnionFindLib::
 ufstat_done(long *v, int n) {
     CkPrintf("[UFSTAT] branch-outcome census, summed over the array\n");
-    for (int i = 0; i < n/2 && i < UFS_N; i++)
+    for (int i = 0; i < UFS_N && 2*UFS_N <= n; i++)
         CkPrintf("[UFSTAT] %-22s walk %14ld   drain %14ld   total %14ld\n",
-                 UFS_NAMES[i], v[i], v[n/2+i] - v[i], v[n/2+i]);
+                 UFS_NAMES[i], v[i], v[UFS_N+i] - v[i], v[UFS_N+i]);
+    if (n >= 2*UFS_N + UFH_N) {
+        // climb-hop histogram: bucket 0 = parent immediately remote,
+        // bucket b>=1 = 2^(b-1)..2^b-1 local hops in one climb episode
+        char line[512]; int off = 0;
+        off += snprintf(line+off, sizeof(line)-off, "[UFSTAT] climb_local_hops_log2:");
+        for (int b = 0; b < UFH_N; b++)
+            if (v[2*UFS_N+b])
+                off += snprintf(line+off, sizeof(line)-off, " %d:%ld", b, v[2*UFS_N+b]);
+        CkPrintf("%s\n", line);
+    }
 }
 
 void UnionFindLib::
 find_components(CkCallback cb) {
     wave_armed_ = false;   // stop periodic waves; the forest is final
-    {   // relay78 census: [0,UFS_N) = at the barrier, [UFS_N,2*UFS_N) = final
-        long both[2*UFS_N];
+    {   // relay78 census: [0,UFS_N) = at the barrier, [UFS_N,2*UFS_N) = final,
+        // [2*UFS_N,2*UFS_N+UFH_N) = climb-hop histogram (whole run)
+        long both[2*UFS_N + UFH_N];
         for (int i = 0; i < UFS_N; i++) { both[i] = ufs_mark_[i]; both[UFS_N+i] = ufs_[i]; }
-        contribute(sizeof(long)*2*UFS_N, both, CkReduction::sum_long,
+        for (int b = 0; b < UFH_N; b++) both[2*UFS_N+b] = ufh_[b];
+        contribute(sizeof(long)*(2*UFS_N+UFH_N), both, CkReduction::sum_long,
                    CkCallback(CkReductionTarget(UnionFindLib, ufstat_done), thisProxy[0]));
     }
     postComponentLabelingCb = cb;

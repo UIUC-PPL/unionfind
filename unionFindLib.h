@@ -244,6 +244,17 @@ class UnionFindLib : public CBase_UnionFindLib {
     enum { UFS_N = 15 };
     long ufs_[UFS_N] = {0};
     long ufs_mark_[UFS_N] = {0};
+    // Local climb-hop histogram (sharding measurement, 2026-08-22): log2
+    // buckets of within-chare hops per climb episode. Bucket 0 = the parent
+    // was immediately remote (zero local hops); bucket b>=1 = 2^(b-1) ..
+    // 2^b - 1 hops. Under a sharded element design each such hop would be
+    // an intra-process message.
+    enum { UFH_N = 16 };
+    long ufh_[UFH_N] = {0};
+    void ufh_note(long steps) {
+        int b = (steps <= 0) ? 0 : 1 + (63 - __builtin_clzl((unsigned long)steps));
+        ufh_[b > UFH_N - 1 ? UFH_N - 1 : b]++;
+    }
     void ufstat_mark();
     void ufstat_done(long *v, int n);
     bool wave_armed_ = false;
