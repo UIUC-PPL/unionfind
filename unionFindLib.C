@@ -384,6 +384,7 @@ find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
                     thisProxy[boss1_loc.first].add_size(boss1_loc.second, src->size);
                 }
                 src->parent = boss1ID;
+                wave_dirty_ = true;   // structural union: chain may deepen
                 //message initID to start path compression in boss2's chain
                 /*std::pair<int,int> init_loc = appPtr->getLocationFromID(initID);
                 this->thisProxy[init_loc.first].compress_path(init_loc.second, boss1ID);
@@ -518,6 +519,7 @@ anchor(uint64_t w_arrIdx, uint64_t v, long int path_base_arrIdx) {
           thisProxy[v_loc_size.first].add_size(v_loc_size.second, w->size);
       }
       w->parent = v; //anchor algo guarantees that v will be smaller here
+      wave_dirty_ = true;   // structural union: chain may deepen
     }
     //correct order (w is larger) and not at the root
     else {
@@ -630,6 +632,7 @@ local_union(uint64_t vid1, uint64_t vid2) {
         vertexAt(arrIdx(tip2))->size += vertexAt(arrIdx(tip1))->size;
         vertexAt(arrIdx(tip1))->parent = (int64_t)tip2;
     }
+    wave_dirty_ = true;   // structural union: chain may deepen
 }
 
 void UnionFindLib::
@@ -728,9 +731,63 @@ static int waveMode() {
 // wave_epoch invalidates cached roots; a stale answer still installs a
 // then-ancestor (guarded), so overlapping waves degrade to extra
 // messages, never to wrong state.
+// Periodic mid-cascade firing (v2, 2026-08-22). The single post-flush
+// wave measured NO benefit at 2B (relay74/75): at the fireUF2Edges
+// barrier the forest is shallow under BOTH streaming settings — with
+// -E 16 the cascade already ran during the walk, with -E 0 it has not
+// run yet — so there is no moment at that barrier when the forest is
+// both deep and stable. The drain the wave targets (334-409 ms at 2B,
+// <1% utilization, 128 PEs each ~97% idle on remote round trips) runs
+// DURING the cascade, so the wave must fire there: each element
+// self-fires a pass every FOF_WAVE_MS while armed. Concurrency with
+// live unions is exactly what wave_apply's two rules were designed for.
+//
+// QD-SAFETY INVARIANT (a message-per-tick heartbeat deadlocks the
+// driver, measured 2026-08-22: CkWaitQD never fires and the disarm in
+// find_components sits behind it): the timer chain itself is Converse-
+// level (CcdCallFnAfter), invisible to QD; a tick runs wave_pass — and
+// hence sends messages — ONLY when wave_dirty_ says a structural union
+// happened since the last pass. At fixpoint every tick is message-free,
+// QD fires, find_components clears wave_armed_, and the next tick ends
+// the chain.
+static int waveMs() {
+    static const int v = [] {
+        const char* e = getenv("FOF_WAVE_MS");
+        return e ? atoi(e) : 0;   // 0 = no periodic firing
+    }();
+    return v;
+}
+
+static void wavePeriodicThunk(void* elem, double) {
+    ((UnionFindLib*)elem)->wave_periodic_tick();
+}
+
+void UnionFindLib::
+wave_arm() {
+    if (waveMode() == 0 || waveMs() <= 0) return;
+    if (wave_armed_) return;
+    wave_armed_ = true;
+    CcdCallFnAfter(wavePeriodicThunk, this, (double)waveMs());
+}
+
+void UnionFindLib::
+wave_periodic_tick() {
+    if (!wave_armed_) return;   // disarmed by find_components; chain ends
+    if (wave_dirty_) {          // clean tick = no messages = QD can fire
+        wave_dirty_ = false;
+        wave_pass();
+    }
+    CcdCallFnAfter(wavePeriodicThunk, this, (double)waveMs());
+}
+
 void UnionFindLib::
 compression_wave() {
     if (waveMode() == 0) return;
+    wave_pass();
+}
+
+void UnionFindLib::
+wave_pass() {
     wave_epoch_++;
     long rewrote = 0;
     std::unordered_map<int, std::vector<needBossData>> dest_buf;
@@ -748,10 +805,11 @@ compression_wave() {
     });
     for (auto& kv : dest_buf)
         this->thisProxy[kv.first].wave_need_root_batch(kv.second);
+    wave_rewrote_total_ += rewrote;
     if (thisIndex == 0)
         CkPrintf("[UnionFindLib] compression wave %d fired (mode %d); "
-                 "element 0 rewrote %ld parents locally\n",
-                 wave_epoch_, waveMode(), rewrote);
+                 "element 0 rewrote %ld parents locally (run total %ld)\n",
+                 wave_epoch_, waveMode(), rewrote, wave_rewrote_total_);
 }
 
 // Apply the wave's answer at vertex q (owner-side): q's chain leads to
@@ -830,6 +888,7 @@ wave_set_root(uint64_t arrIdx, long rootID) {
  */
 void UnionFindLib::
 find_components(CkCallback cb) {
+    wave_armed_ = false;   // stop periodic waves; the forest is final
     postComponentLabelingCb = cb;
     // Stale entries from a previous labeling run would serve wrong labels
     // (the cache is consulted before any request is sent).

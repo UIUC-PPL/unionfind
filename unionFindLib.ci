@@ -48,6 +48,7 @@ module unionFindLib {
         // widths MUST match unionFindLib.h — a mismatched entry silently
         // truncates at marshalling time (the 2026-08-21 under-merge).
         entry void compression_wave();
+        entry void wave_arm();
         entry void wave_need_root_batch(const std::vector<needBossData> &batch);
         entry void wave_set_root(uint64_t arrIdx, long rootID);
         entry [reductiontarget] void component_count_done(int totalCount);

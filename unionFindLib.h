@@ -228,11 +228,21 @@ class UnionFindLib : public CBase_UnionFindLib {
     // validation arm). No completion callback: the message cascade drains
     // into whatever QD follows.
     void compression_wave();
+    void wave_arm();
+    void wave_periodic_tick();
+    void wave_pass();
     void wave_need_root_batch(const std::vector<needBossData>& batch);
     void wave_set_root(uint64_t arrIdx, long rootID);
     void wave_need_root_local(uint64_t arrIdx, uint64_t fromID, long& rewrote);
     void wave_apply(unionFindVertex* q, long rootID, long& rewrote);
     int wave_epoch_ = 0;
+    bool wave_armed_ = false;
+    // Set on every STRUCTURAL union on this element (a former root gains a
+    // parent) — not on compression writes. A periodic tick runs a pass only
+    // when this is set; a clean tick sends NO messages, which is what lets
+    // the driver's CkWaitQD fire while the timer chain is still alive.
+    bool wave_dirty_ = false;
+    long wave_rewrote_total_ = 0;
     void component_count_done(int totalCount);
     void start_component_labeling();
     void insertDataNeedBoss(const needBossData & data);
