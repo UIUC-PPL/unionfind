@@ -443,7 +443,7 @@ find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
                 ufs_[5]++;                            // real union
                 // propagate size to new root before setting parent
                 if (sizesEnabled()) {
-                    std::pair<int,int> boss1_loc = getLocationFromID(boss1ID);
+                    std::pair<int, uint64_t> boss1_loc = getLocationFromID(boss1ID);
                     if (boss1_loc.first == thisIndex) {
                         add_size(boss1_loc.second, src->size);
                     } else {
@@ -583,7 +583,7 @@ anchor(uint64_t w_arrIdx, uint64_t v, long int path_base_arrIdx) {
       }
       // propagate size to new root before setting parent
       if (sizesEnabled()) {
-      std::pair<int,int> v_loc_size = getLocationFromID(v);
+      std::pair<int, uint64_t> v_loc_size = getLocationFromID(v);
       if (v_loc_size.first == thisIndex) {
           add_size(v_loc_size.second, w->size);
       } else {
@@ -640,7 +640,18 @@ local_union(uint64_t vid1, uint64_t vid2) {
     // idx = vid & 0xFFFFFFFF), silently diverging from the registered
     // getLocationFromID. Decode through the registered function so the
     // application's encoding is authoritative on this fast path too.
-    auto arrIdx = [this](uint64_t vid) -> int { return getLocationFromID(vid).second; };
+    // 64-bit (2026-08-23). arrIdx returned `int` while getLocationFromID's
+    // .second is a uint64_t local index -- in lazy mode a RAW PARTICLE ORDER
+    // (paratreet2 fof/FoFPhase1.h kUF2IdxBits). Past 2^31 particles EVERY
+    // vertexAt() below addressed the wrong vertex, so the merge at the bottom
+    // of this function (`vertexAt(arrIdx(tipN))->parent = ...`) wrote a
+    // parent pointer into a BOGUS lazily-created vertex and the two real
+    // components stayed apart -- a silent lost merge, no abort. This is the
+    // under-merge that made FOF3STAT components drift with process count on
+    // the 24B/58B snapshots while the 1.98B set (below 2^31, so never
+    // truncating) stayed bit-identical at 8/16/32/64/128 nodes.
+    // chareOf is genuinely int: a chare index, not an id.
+    auto arrIdx = [this](uint64_t vid) -> uint64_t { return getLocationFromID(vid).second; };
     auto chareOf = [this](uint64_t vid) -> int { return getLocationFromID(vid).first; };
 
     // Walk parent chain staying within this chare.
@@ -726,8 +737,8 @@ local_path_compression(unionFindVertex *src, uint64_t compressedParent) {
 // check if two vertices are on same chare
 bool UnionFindLib::
 check_same_chares(uint64_t v1, uint64_t v2) {
-    std::pair<int,int> v1_loc = getLocationFromID(v1);
-    std::pair<int,int> v2_loc = getLocationFromID(v2);
+    std::pair<int, uint64_t> v1_loc = getLocationFromID(v1);
+    std::pair<int, uint64_t> v2_loc = getLocationFromID(v2);
     if (v1_loc.first == v2_loc.first)
         return true;
     return false;
@@ -784,7 +795,7 @@ add_size(uint64_t arrIdx, int64_t delta) {
         vertexAt(arrIdx)->size += delta;
     } else {
         ufs_[9]++;
-        std::pair<int,int> par_loc = getLocationFromID((uint64_t)vertexAt(arrIdx)->parent);
+        std::pair<int, uint64_t> par_loc = getLocationFromID((uint64_t)vertexAt(arrIdx)->parent);
         if (par_loc.first == thisIndex) {
             add_size(par_loc.second, delta);
         } else {
