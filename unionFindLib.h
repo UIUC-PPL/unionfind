@@ -22,6 +22,12 @@ struct unionFindVertex {
     uint64_t vertexID;
     int64_t parent;
     int64_t process_tip; //used during path compression to store the last node local vertex on the path to the root
+    // COMPONENT LABEL. Since 2026-08-21 (bbe0856) this is the component
+    // boss's own vertexID — a SPARSE 64-bit id — NOT a dense serial in
+    // 0..C-1 as it was under the removed prefix stage. Key it through a map;
+    // never use it as an array index. See "Component numbering" in README.md
+    // for why, and for how to reconstruct dense numbering if a client needs
+    // it (the prefix library is still built and wired for exactly that).
     long int componentNumber = -1;
     int64_t componentSize = -1;
     int64_t size = 1;
