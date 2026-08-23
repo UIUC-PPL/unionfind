@@ -880,6 +880,13 @@ wave_pass() {
     wave_epoch_++;
     long rewrote = 0;
     std::unordered_map<int, std::vector<needBossData>> dest_buf;
+    // Same hazard as start_component_labeling: wave_need_root_local reaches
+    // vertexAt(), which emplaces on a miss and can rehash lazy_store while
+    // this range-for is walking it. Only reachable under FOF_WAVE /
+    // FOF_WAVE_MS (both default off), so it has never been the live bug --
+    // but it is the identical defect, so it gets the identical treatment.
+    std::vector<needBossData> deferred_local;
+    const size_t buckets_before = lazy_store.bucket_count();
     forEachVertex([&](unionFindVertex& v, uint64_t) {
         if (v.parent == -1) return;              // roots have nothing to learn
         std::pair<int, uint64_t> ploc = getLocationFromID((uint64_t)v.parent);
@@ -887,11 +894,14 @@ wave_pass() {
         d.arrIdx = ploc.second;
         d.senderID = v.vertexID;
         if (ploc.first == thisIndex) {
-            wave_need_root_local(ploc.second, v.vertexID, rewrote);
+            deferred_local.push_back(d);
         } else {
             dest_buf[ploc.first].push_back(d);
         }
     });
+    CkAssert(lazy_store.bucket_count() == buckets_before);
+    for (const needBossData& d : deferred_local)
+        wave_need_root_local(d.arrIdx, d.senderID, rewrote);
     for (auto& kv : dest_buf)
         this->thisProxy[kv.first].wave_need_root_batch(kv.second);
     wave_rewrote_total_ += rewrote;
@@ -1091,6 +1101,25 @@ start_component_labeling() {
     // labeling-scatter batching (paratreet2 design/relabel-representative.md
     // era agenda item; observed ~1400 per-vertex sends from one chare at 2B).
     std::unordered_map<int, std::vector<needBossData>> dest_buf;
+
+    // MUTATION-FREE ITERATION (2026-08-23). forEachVertex is a range-for
+    // over lazy_store, an unordered_map. set_component and need_boss both
+    // reach vertexAt(), which EMPLACES on a miss -- and an emplace that
+    // rehashes invalidates the iterator mid-loop, so vertices are silently
+    // SKIPPED. A skipped vertex never requests a label and keeps
+    // componentNumber == -1, which is what paratreet2's applyUF2Labels
+    // then rejects (jobs 5332555/5332649/5332706: 68 PEs still failing at
+    // 24.4B particles after the two width fixes, with the failing local
+    // ids spread on both sides of 2^31 -- i.e. not a width at all).
+    // So: collect the work here, apply it after the loop has finished.
+    // The two earlier width bugs made this far more likely by emplacing at
+    // bogus truncated keys, which is why fixing them cut the failures 96%
+    // without removing them.
+    struct DeferredSet { uint64_t idx; long compNum; int64_t compSize; };
+    std::vector<DeferredSet> deferred_set;
+    std::vector<needBossData> deferred_local_needboss;
+    const size_t buckets_before = lazy_store.bucket_count();
+
     forEachVertex([&](unionFindVertex& vtx, uint64_t i) {
         unionFindVertex *v = &vtx;
 #ifndef ANCHOR_ALGO
@@ -1100,7 +1129,7 @@ start_component_labeling() {
 #endif
             // one of the bosses/root found
             CkAssert(v->componentNumber != -1); // phase 2a assigned serial numbers
-            set_component(i, v->componentNumber, v->size);
+            deferred_set.push_back({i, v->componentNumber, v->size});
         }
 
         if (v->componentNumber == -1) {
@@ -1112,11 +1141,14 @@ start_component_labeling() {
                 if(parentCache[v->parent].compNum != -1)
                 {
                     //call set component on myself
-                    set_component(i, parentCache[v->parent].compNum, parentCache[v->parent].compSize);
+                    deferred_set.push_back({i, parentCache[v->parent].compNum,
+                                            parentCache[v->parent].compSize});
                     //then loop over and call set component on the waiting requests (should only run once per cache entry)
-                    for(int j=0; j<parentCache[v->parent].requestors.size(); j++)
+                    for(size_t j=0; j<parentCache[v->parent].requestors.size(); j++)
                     {
-                        set_component(parentCache[v->parent].requestors[j], parentCache[v->parent].compNum, parentCache[v->parent].compSize);
+                        deferred_set.push_back({(uint64_t)parentCache[v->parent].requestors[j],
+                                                parentCache[v->parent].compNum,
+                                                parentCache[v->parent].compSize});
                     }
                     parentCache[v->parent].requestors.clear();
                 }
@@ -1134,7 +1166,8 @@ start_component_labeling() {
                 data.senderID = v->vertexID;
                 if(parent_loc.first == thisIndex)
                 {
-                    insertDataNeedBoss(data);
+                    // need_boss -> vertexAt() can emplace too; defer it.
+                    deferred_local_needboss.push_back(data);
                 }
                 else
                 {
@@ -1151,6 +1184,15 @@ start_component_labeling() {
             }
         }
     });
+
+    // The loop is over; lazy_store may be mutated freely again. If this
+    // trips, something inside the lambda still reached vertexAt().
+    CkAssert(lazy_store.bucket_count() == buckets_before);
+
+    for (const DeferredSet& d : deferred_set)
+        set_component(d.idx, d.compNum, d.compSize);
+    for (const needBossData& d : deferred_local_needboss)
+        insertDataNeedBoss(d);
 
     // Flush the batched scatter: one message per destination chare.
     for (auto& kv : dest_buf)
