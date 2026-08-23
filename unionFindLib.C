@@ -1223,11 +1223,22 @@ void UnionFindLib::
 set_component(uint64_t arrIdx, long int compNum, int64_t compSize) {
     // Iterative propagation via an explicit work queue to avoid stack overflow
     // from deep recursive chains when union-find trees are not fully compressed.
-    std::vector<int> work_queue;
+    //
+    // 64-bit (2026-08-23). This queue held `int` while EVERY other id on the
+    // path -- arrIdx, vertexAt(), need_boss_requests, local_requests -- was
+    // already 64-bit. In lazy mode a local id is a RAW PARTICLE ORDER
+    // (paratreet2 fof/FoFPhase1.h kUF2IdxBits comment), so past 2^31
+    // particles push_back(arrIdx) truncated it: vertexAt(idx) then created a
+    // BOGUS lazy_store entry at the wrapped key and labelled that, while the
+    // real vertex kept componentNumber == -1. It surfaced as
+    // applyUF2Labels' CkEnforce(it->second >= 0) firing on 6760 of 7168 PEs
+    // at 24.4B particles -- ~the exact fraction of PEs holding orders above
+    // 2^31 (job 5332555).
+    std::vector<uint64_t> work_queue;
     work_queue.push_back(arrIdx);
 
     while (!work_queue.empty()) {
-        int idx = work_queue.back();
+        uint64_t idx = work_queue.back();
         work_queue.pop_back();
 
         vertexAt(idx)->componentNumber = compNum;
