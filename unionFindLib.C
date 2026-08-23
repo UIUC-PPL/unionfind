@@ -1177,7 +1177,14 @@ insertDataFindBoss(const findBossData & data) {
 
 void UnionFindLib::
 insertDataNeedBoss(const needBossData & data) {
-    int arrIdx = data.arrIdx;
+    // 64-bit (2026-08-23). needBossData::arrIdx is uint64_t and need_boss
+    // takes uint64_t; this local was the only int between them. In lazy
+    // mode the id is a raw particle order, so past 2^31 the vertex looked
+    // up here was not the one the sender meant. insertDataNeedBossBatch
+    // (just below) always passed it through untruncated, which is why the
+    // batched path hid most of it -- the residue was still 2084 PEs at
+    // 24.4B particles (job 5332649).
+    uint64_t arrIdx = data.arrIdx;
     uint64_t fromID = data.senderID;
     this->need_boss(arrIdx, fromID);
 }
