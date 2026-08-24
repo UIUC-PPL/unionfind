@@ -64,7 +64,9 @@ back:
   over boss counts would number only the touched components.
 * The prefix reintroduces the constraint that dense serials are not stable
   until quiescence. Self-naming is what makes labeling re-runnable mid-stream
-  (the compression-wave path, `FOF_WAVE`); a dense scheme cannot be.
+  (the compression-wave path, `FOF_WAVE` — compile-gated under
+  `CONCURRENT_COMPRESSION_WAVE` since the 2026-08 cleanup, see
+  Makefile.common); a dense scheme cannot be.
 
 ### Todos
 

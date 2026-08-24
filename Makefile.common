@@ -17,9 +17,18 @@ PROFILE= -DPROFILING
 # ABI: this flag changes unionFindLib.h's class layout; the CLIENT build
 # (e.g. paratreet2) must use the SAME setting, and both need make clean.
 AGGREGATION =
+# Concurrent compression wave: mid-stream global path compression, safe to
+# fire while unions are in flight (FOF_WAVE / FOF_WAVE_MS env knobs at run
+# time). DEFAULT OFF: refuted for FoF at 2B (campaign 2026-08, relay74/76/77
+# — benefit is capped by forest depth and FoF forests are shallow), kept for
+# explicit-graph studies where chains can run deep. Turn on with:
+#   make WAVE=-DCONCURRENT_COMPRESSION_WAVE
+# ABI: adds 3 fields to unionFindVertex (40 B/vertex), so like AGGREGATION
+# the CLIENT build must use the SAME setting, and both need make clean.
+WAVE =
 #for datatype declaration
 UNIONFIND= -DUNIONFIND
-CHARMC = $(CHARM_DIR)/bin/charmc $(ANCHOR) $(PROFILE) $(UNIONFIND) $(AGGREGATION)
+CHARMC = $(CHARM_DIR)/bin/charmc $(ANCHOR) $(PROFILE) $(UNIONFIND) $(AGGREGATION) $(WAVE)
 OPTS = -std=c++11 -O3 -g
 LD_OPTS =
 

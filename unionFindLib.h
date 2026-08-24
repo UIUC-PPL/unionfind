@@ -33,12 +33,17 @@ struct unionFindVertex {
     int64_t size = 1;
     std::vector<uint64_t> need_boss_requests; //request queue for processing need_boss requests
     long int findOrAnchorCount = 0;
+#ifdef CONCURRENT_COMPRESSION_WAVE
     // Compression-wave state (transient, never pup'd): the root this
     // vertex learned in wave epoch `wave_epoch`, and requesters parked
     // here awaiting it. See compression_wave() in unionFindLib.C.
+    // Compile-gated: 40 B/vertex (incl. a vector ctor/dtor) that the
+    // FoF campaign showed buys nothing on shallow forests (relay74/76/77);
+    // enable for explicit-graph studies where forests can run deep.
     long wave_root = -1;
     int wave_epoch = -1;
     std::vector<uint64_t> wave_parked;
+#endif
 
     void pup(PUP::er &p) {
         p|vertexID;
@@ -224,6 +229,7 @@ class UnionFindLib : public CBase_UnionFindLib {
 
     public:
     void find_components(CkCallback cb);
+#ifdef CONCURRENT_COMPRESSION_WAVE
     // Mid-stream global path compression (the "wave", design:
     // paratreet2 design/uf2-compression-wave rationale, 2026-08-21).
     // Safe to fire at ANY time, any number of times, concurrently with
@@ -233,6 +239,11 @@ class UnionFindLib : public CBase_UnionFindLib {
     // union_request instead of writing — unconditionally correct, the
     // validation arm). No completion callback: the message cascade drains
     // into whatever QD follows.
+    // Compile-gated (CONCURRENT_COMPRESSION_WAVE): refuted for FoF —
+    // benefit is capped by forest depth and FoF forests are shallow
+    // (relay74/76/77) — but kept for explicit-graph studies with deep
+    // chains. NOTE: the flag changes unionFindVertex's layout, so library
+    // and client must be built with the same setting (see Makefile.common).
     void compression_wave();
     void wave_arm();
     void wave_periodic_tick();
@@ -242,27 +253,6 @@ class UnionFindLib : public CBase_UnionFindLib {
     void wave_need_root_local(uint64_t arrIdx, uint64_t fromID, long& rewrote);
     void wave_apply(unionFindVertex* q, long rootID, long& rewrote);
     int wave_epoch_ = 0;
-    // relay78 INSTRUMENTATION (Kale's question, 2026-08-22: during the drain,
-    // are findBoss calls propagating, unioning, or being discarded as
-    // same-root?). Branch-outcome census, summed over the array and printed
-    // once. UFS_MARK is taken at the fireUF2Edges barrier so walk-concurrent
-    // work and the post-walk drain can be separated.
-    enum { UFS_N = 15 };
-    long ufs_[UFS_N] = {0};
-    long ufs_mark_[UFS_N] = {0};
-    // Local climb-hop histogram (sharding measurement, 2026-08-22): log2
-    // buckets of within-chare hops per climb episode. Bucket 0 = the parent
-    // was immediately remote (zero local hops); bucket b>=1 = 2^(b-1) ..
-    // 2^b - 1 hops. Under a sharded element design each such hop would be
-    // an intra-process message.
-    enum { UFH_N = 16 };
-    long ufh_[UFH_N] = {0};
-    void ufh_note(long steps) {
-        int b = (steps <= 0) ? 0 : 1 + (63 - __builtin_clzl((unsigned long)steps));
-        ufh_[b > UFH_N - 1 ? UFH_N - 1 : b]++;
-    }
-    void ufstat_mark();
-    void ufstat_done(long *v, int n);
     bool wave_armed_ = false;
     // Set on every STRUCTURAL union on this element (a former root gains a
     // parent) — not on compression writes. A periodic tick runs a pass only
@@ -270,6 +260,7 @@ class UnionFindLib : public CBase_UnionFindLib {
     // the driver's CkWaitQD fire while the timer chain is still alive.
     bool wave_dirty_ = false;
     long wave_rewrote_total_ = 0;
+#endif
     void component_count_done(int totalCount);
     void start_component_labeling();
     void insertDataNeedBoss(const needBossData & data);
