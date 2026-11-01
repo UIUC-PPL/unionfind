@@ -68,13 +68,15 @@ back:
   `CONCURRENT_COMPRESSION_WAVE` since the 2026-08 cleanup, see
   Makefile.common); a dense scheme cannot be.
 
-### Spreading the union phase over a process's PEs (`UF_SPREAD=1`)
+### Spreading the union phase over a process's PEs (`spread`, `UF_SPREAD`)
 
 With `unionFindInitOnePerNode*`, the one library element per process lives on
 that process's first PE. Without spreading, every union batch and every
 find/anchor cascade message runs on that PE, even when the other PEs of the
-process are idle. With `UF_SPREAD=1` set at run time, the union phase goes through a
-per-process nodegroup, `UFInbox`. Its messages can run on any PE of the
+process are idle. If the caller passes `spread = true` to
+`unionFindInitOnePerNode*`, the union phase goes through a per-process
+nodegroup, `UFInbox`. The default is false. `UF_SPREAD=0` or `1` at run time
+overrides the caller either way. Its messages can run on any PE of the
 process, and one PE at a time drains the queued work, so the element's code
 still runs single-threaded.
 
@@ -85,8 +87,8 @@ still runs single-threaded.
 - Clients submit batches with `UnionFindLib::submitUnionRequests` (or the
   `union_requests` entry, which forwards to the inbox). Do not use the
   single-edge `union_request` entry while spread is on.
-- `UF_SPREAD=1` aborts at init in `AGGREGATION` or
-  `CONCURRENT_COMPRESSION_WAVE` builds.
+- Spread aborts at init in `AGGREGATION` or `CONCURRENT_COMPRESSION_WAVE`
+  builds.
 - `unionFindInit` (the bound-array mode) ignores it.
 
 ### Todos

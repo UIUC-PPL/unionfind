@@ -174,9 +174,10 @@ class UnionFindLib : public CBase_UnionFindLib {
 
     void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CProxy_UFInbox inbox, CkCallback ready);
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
-    // UF_SPREAD=1: unionFindInitOnePerNode* route the union phase through a
-    // per-process UFInbox nodegroup (see below). Read once per process.
-    static bool spreadEnabled();
+    // Whether unionFindInitOnePerNode* route the union phase through a
+    // per-process UFInbox nodegroup (see below): the caller's `dflt`, unless
+    // UF_SPREAD=0/1 is set, which overrides it either way.
+    static bool spreadEnabled(bool dflt);
     // A null inbox. Not CProxy_UFInbox(): outside CMK_ERROR_CHECKING builds a
     // default-constructed group proxy leaves its group id uninitialized, so
     // it is not null and isZero() on it reads garbage.
@@ -201,12 +202,15 @@ class UnionFindLib : public CBase_UnionFindLib {
     // consults it. Required on runtimes without group-dependency buffering
     // (reconverse): the one-argument form above creates the map inline and
     // can abort with "Local branch of array map is NULL!" at scale.
+    // spread: run the union phase through UFInbox (UF_SPREAD overrides).
     static CProxy_UnionFindLib unionFindInitOnePerNode(const CkCallback& ready,
-                                                       CProxy_UFNodeMap node_map);
+                                                       CProxy_UFNodeMap node_map,
+                                                       bool spread = false);
     // Lazy-mode variant: same placement, but elements use lazy vertex
     // storage (enableLazyMode broadcast before ready fires).
     static CProxy_UnionFindLib unionFindInitOnePerNodeLazy(const CkCallback& ready,
-                                                           CProxy_UFNodeMap node_map);
+                                                           CProxy_UFNodeMap node_map,
+                                                           bool spread = false);
 #ifdef AGGREGATION
     void set_tram_proxy(tram_proxy_t proxy); // htram wiring, aggregation only
 #endif
@@ -356,8 +360,8 @@ class UFSpinLock {
     void unlock() { held_.store(false, std::memory_order_release); }
 };
 
-// Per-process front door for the union phase (UF_SPREAD=1 with
-// unionFindInitOnePerNode*). The array element sits on its process's first
+// Per-process front door for the union phase (unionFindInitOnePerNode* with
+// spread = true or UF_SPREAD=1). The array element sits on its process's first
 // PE (UFNodeMap), so otherwise every union batch and cascade message runs
 // there, behind whatever else that PE is doing. In paratreet2's FoF3 that is
 // the phase-3 walk: a few of those PEs set the walk's end (paratreet2

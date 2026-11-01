@@ -1553,14 +1553,16 @@ unionFindInitOnePerNode(const CkCallback& ready) {
 // delivered in order, so it precedes any union_request the caller sends
 // after ready).
 CProxy_UnionFindLib UnionFindLib::
-unionFindInitOnePerNodeLazy(const CkCallback& ready, CProxy_UFNodeMap node_map) {
-    CProxy_UnionFindLib lib_proxy = unionFindInitOnePerNode(ready, node_map);
+unionFindInitOnePerNodeLazy(const CkCallback& ready, CProxy_UFNodeMap node_map,
+                            bool spread) {
+    CProxy_UnionFindLib lib_proxy = unionFindInitOnePerNode(ready, node_map, spread);
     lib_proxy.enableLazyMode();
     return lib_proxy;
 }
 
 CProxy_UnionFindLib UnionFindLib::
-unionFindInitOnePerNode(const CkCallback& ready, CProxy_UFNodeMap node_map) {
+unionFindInitOnePerNode(const CkCallback& ready, CProxy_UFNodeMap node_map,
+                        bool spread) {
     int n = CkNumNodes();
 
     //tram init: mirror unionFindInit so the one-per-node path also works when
@@ -1587,19 +1589,20 @@ unionFindInitOnePerNode(const CkCallback& ready, CProxy_UFNodeMap node_map) {
     CkArrayOptions opts(n);
     opts.setMap(node_map);
 
-    // UF_SPREAD=1: the union phase goes through a per-process UFInbox (see
-    // unionFindLib.h). Only messages reach it, never a ckLocalBranch from
-    // another chare, so creating it here does not race as the map would.
+    // spread (or UF_SPREAD=1): the union phase goes through a per-process
+    // UFInbox (see unionFindLib.h). Only messages reach it, never a
+    // ckLocalBranch from another chare, so creating it here does not race as
+    // the map would.
     CProxy_UFInbox inbox = noInbox();
-    if (spreadEnabled()) {
+    if (spreadEnabled(spread)) {
     #if defined(AGGREGATION) || defined(CONCURRENT_COMPRESSION_WAVE)
         // htram delivers into the element directly, and the wave's entries
         // run on the element; either would race with the inbox's drains.
-        CkAbort("UnionFindLib: UF_SPREAD=1 is incompatible with AGGREGATION "
-                "and CONCURRENT_COMPRESSION_WAVE builds\n");
+        CkAbort("UnionFindLib: spread (UF_SPREAD) is incompatible with "
+                "AGGREGATION and CONCURRENT_COMPRESSION_WAVE builds\n");
     #endif
         inbox = CProxy_UFInbox::ckNew();
-        printf("UnionFindLib: union phase spread over each process's PEs (UF_SPREAD=1)\n");
+        printf("UnionFindLib: union phase spread over each process's PEs\n");
     }
 
     CProxy_UnionFindLib lib_proxy = CProxy_UnionFindLib::ckNew(opts);
@@ -1659,12 +1662,12 @@ CProxy_UFInbox UnionFindLib::noInbox() {
     return CProxy_UFInbox(zero);
 }
 
-bool UnionFindLib::spreadEnabled() {
-    static const bool on = [] {
+bool UnionFindLib::spreadEnabled(bool dflt) {
+    static const int env = [] {  // -1 = unset
         const char* e = getenv("UF_SPREAD");
-        return e && atoi(e) != 0;
+        return e ? (atoi(e) != 0 ? 1 : 0) : -1;
     }();
-    return on;
+    return env < 0 ? dflt : env == 1;
 }
 
 void UnionFindLib::submitUnionRequests(const CProxy_UnionFindLib& lib, int chare,
