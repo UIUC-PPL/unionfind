@@ -150,7 +150,8 @@ void UnionFindLib::boss_send(int chare_index, findBossData data) {
 
     //send message to the chare
     #ifndef AGGREGATION
-    this->thisProxy[chare_index].insertDataFindBoss(data);
+    if (spread()) inbox_[chare_index].insertDataFindBoss(data);
+    else this->thisProxy[chare_index].insertDataFindBoss(data);
     #else
     data.targetChareIdx = chare_index;
     tram->insertValue(data, pe);
@@ -269,7 +270,8 @@ void UnionFindLib::anchor_send(int chare_index, anchorData data) {
 
     //send data during anchoring, with or without aggregation based on compilation flag
     #ifndef AGGREGATION
-    this->thisProxy[chare_index].insertDataAnchor(data);
+    if (spread()) inbox_[chare_index].insertDataAnchor(data);
+    else this->thisProxy[chare_index].insertDataAnchor(data);
     #else
     data.targetChareIdx = chare_index;
     tram->insertValue(data, pe);
@@ -292,6 +294,12 @@ union_request(uint64_t v, uint64_t w) {
 // ANCHOR_ALGO guard: both algo variants provide a two-arg union_request.
 void UnionFindLib::
 union_requests(const std::vector<UFEdge>& edges) {
+    // Spread: a client that sent here instead of submitUnionRequests still
+    // must not run unions on this PE while the inbox drains elsewhere.
+    if (spread()) {
+        inbox_[thisIndex].union_requests(edges);
+        return;
+    }
     for (const auto& e : edges) union_request(e.a, e.b);
 }
 
@@ -398,7 +406,8 @@ find_boss1(uint64_t arrIdx, uint64_t partnerID, uint64_t senderID) {
             shortCircuitData scd;
             scd.arrIdx = sender_loc.second;
             scd.grandparentID = curr->parent;
-            thisProxy[sender_loc.first].short_circuit_parent(scd);
+            if (spread()) inbox_[sender_loc.first].short_circuit_parent(scd);
+            else thisProxy[sender_loc.first].short_circuit_parent(scd);
         }
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
@@ -429,7 +438,8 @@ find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
                     if (boss1_loc.first == thisIndex) {
                         add_size(boss1_loc.second, src->size);
                     } else {
-                        thisProxy[boss1_loc.first].add_size(boss1_loc.second, src->size);
+                        if (spread()) inbox_[boss1_loc.first].add_size(boss1_loc.second, src->size);
+                        else thisProxy[boss1_loc.first].add_size(boss1_loc.second, src->size);
                     }
                 }
                 src->parent = boss1ID;
@@ -499,7 +509,8 @@ find_boss2(uint64_t arrIdx, uint64_t boss1ID, uint64_t senderID) {
             shortCircuitData scd;
             scd.arrIdx = sender_loc.second;
             scd.grandparentID = curr->parent;
-            thisProxy[sender_loc.first].short_circuit_parent(scd);
+            if (spread()) inbox_[sender_loc.first].short_circuit_parent(scd);
+            else thisProxy[sender_loc.first].short_circuit_parent(scd);
         }
 
         CProxy_UnionFindLibGroup libGroup(libGroupID);
@@ -565,7 +576,8 @@ anchor(uint64_t w_arrIdx, uint64_t v, long int path_base_arrIdx) {
       if (v_loc_size.first == thisIndex) {
           add_size(v_loc_size.second, w->size);
       } else {
-          thisProxy[v_loc_size.first].add_size(v_loc_size.second, w->size);
+          if (spread()) inbox_[v_loc_size.first].add_size(v_loc_size.second, w->size);
+          else thisProxy[v_loc_size.first].add_size(v_loc_size.second, w->size);
       }
       }
       w->parent = v; //anchor algo guarantees that v will be smaller here
@@ -751,7 +763,8 @@ compress_path(uint64_t arrIdx, uint64_t compressedParent) {
     //message the parent before reseting it
     if (src->vertexID != compressedParent) {//reached the top of path
         std::pair<int, uint64_t> parent_loc = getLocationFromID(src->parent);
-        this->thisProxy[parent_loc.first].compress_path(parent_loc.second, compressedParent);
+        if (spread()) inbox_[parent_loc.first].compress_path(parent_loc.second, compressedParent);
+        else this->thisProxy[parent_loc.first].compress_path(parent_loc.second, compressedParent);
         CProxy_UnionFindLibGroup libGroup(libGroupID);
         libGroup.ckLocalBranch()->increase_message_count();
         src->parent = compressedParent;
@@ -777,7 +790,8 @@ add_size(uint64_t arrIdx, int64_t delta) {
         if (par_loc.first == thisIndex) {
             add_size(par_loc.second, delta);
         } else {
-            thisProxy[par_loc.first].add_size(par_loc.second, delta);
+            if (spread()) inbox_[par_loc.first].add_size(par_loc.second, delta);
+            else thisProxy[par_loc.first].add_size(par_loc.second, delta);
         }
     }
 }
@@ -1502,7 +1516,8 @@ unionFindInit(CkArrayID clientArray, int n) {
 
     // unionFindInit does not order against a ready callback; the elements
     // contribute to an ignored callback (see passLibGroupID's `ready`).
-    _UfLibProxy.passLibGroupID(libGroupID, prefixLibArray, CkCallback(CkCallback::ignore));
+    _UfLibProxy.passLibGroupID(libGroupID, prefixLibArray, noInbox(),
+                               CkCallback(CkCallback::ignore));
 
     #ifdef AGGREGATION
     // print aggregation option
@@ -1572,6 +1587,21 @@ unionFindInitOnePerNode(const CkCallback& ready, CProxy_UFNodeMap node_map) {
     CkArrayOptions opts(n);
     opts.setMap(node_map);
 
+    // UF_SPREAD=1: the union phase goes through a per-process UFInbox (see
+    // unionFindLib.h). Only messages reach it, never a ckLocalBranch from
+    // another chare, so creating it here does not race as the map would.
+    CProxy_UFInbox inbox = noInbox();
+    if (spreadEnabled()) {
+    #if defined(AGGREGATION) || defined(CONCURRENT_COMPRESSION_WAVE)
+        // htram delivers into the element directly, and the wave's entries
+        // run on the element; either would race with the inbox's drains.
+        CkAbort("UnionFindLib: UF_SPREAD=1 is incompatible with AGGREGATION "
+                "and CONCURRENT_COMPRESSION_WAVE builds\n");
+    #endif
+        inbox = CProxy_UFInbox::ckNew();
+        printf("UnionFindLib: union phase spread over each process's PEs (UF_SPREAD=1)\n");
+    }
+
     CProxy_UnionFindLib lib_proxy = CProxy_UnionFindLib::ckNew(opts);
     _UfLibProxy = lib_proxy;
 
@@ -1585,7 +1615,7 @@ unionFindInitOnePerNode(const CkCallback& ready, CProxy_UFNodeMap node_map) {
 
     CkGroupID lgid = CProxy_UnionFindLibGroup::ckNew();
 
-    lib_proxy.passLibGroupID(lgid, pla, ready);
+    lib_proxy.passLibGroupID(lgid, pla, inbox, ready);
 
     #ifdef AGGREGATION
     printf("UnionFindLib: Compiled with aggregation optimizations\n");
@@ -1596,15 +1626,190 @@ unionFindInitOnePerNode(const CkCallback& ready, CProxy_UFNodeMap node_map) {
     return lib_proxy;
 }
 
-void UnionFindLib::passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CkCallback ready)
+void UnionFindLib::passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CProxy_UFInbox inbox,
+                                  CkCallback ready)
 {
     prefixLibArray = pla;
     libGroupID = lgid;
     _UfLibProxy = this->thisProxy;
+    inbox_ = inbox;
+    spread_ = !inbox.ckGetGroupID().isZero();
+    if (spread()) {
+        // One element per process, element i on node i, so inbox branch i is
+        // in this process and the pointer is valid there.
+        CkEnforce(thisIndex == CkMyNode());
+        inbox_[thisIndex].attach((uint64_t)(uintptr_t)this, thisIndex);
+        s_inbox = inbox_;
+        s_inboxFor = thisProxy.ckGetArrayID();
+    }
     // Client-facing API addition: contribute so callers (e.g.
     // unionFindInitOnePerNode) can order initialization against later
     // broadcasts. unionFindInit passes CkCallback::ignore.
     contribute(ready);
+}
+
+/*------------------- Spread union phase: UFInbox -----------------*/
+
+CProxy_UFInbox UnionFindLib::s_inbox = UnionFindLib::noInbox();
+CkArrayID UnionFindLib::s_inboxFor;
+
+CProxy_UFInbox UnionFindLib::noInbox() {
+    CkGroupID zero;
+    zero.setZero();
+    return CProxy_UFInbox(zero);
+}
+
+bool UnionFindLib::spreadEnabled() {
+    static const bool on = [] {
+        const char* e = getenv("UF_SPREAD");
+        return e && atoi(e) != 0;
+    }();
+    return on;
+}
+
+void UnionFindLib::submitUnionRequests(const CProxy_UnionFindLib& lib, int chare,
+                                       const std::vector<UFEdge>& edges) {
+    if (!s_inbox.ckGetGroupID().isZero() && lib.ckGetArrayID() == s_inboxFor)
+        s_inbox[CkMyNode()].union_requests(edges);
+    else
+        lib[chare].union_requests(edges);
+}
+
+// How long one PE drains before passing the rest on (UF_SPREAD_BUDGET_US).
+static double spreadBudget() {
+    static const double s = [] {
+        const char* e = getenv("UF_SPREAD_BUDGET_US");
+        return (e ? atof(e) : 200.0) * 1e-6;
+    }();
+    return s;
+}
+
+void UFInbox::attach(uint64_t lib, int libIdx) {
+    CkEnforce(libIdx == CkMyNode());
+    {
+        std::lock_guard<UFSpinLock> g(qlock_);
+        lib_ = reinterpret_cast<UnionFindLib*>((uintptr_t)lib);
+    }
+    tryDrain(); // anything that arrived before the element did
+}
+
+void UFInbox::push(UFWork&& w) {
+    {
+        std::lock_guard<UFSpinLock> g(qlock_);
+        pending_.push_back(std::move(w));
+    }
+    tryDrain();
+}
+
+void UFInbox::tryDrain() {
+    std::vector<UFWork> batch;
+    // Losing the exchange means another PE is draining; it rechecks the
+    // queue after releasing the flag, so our work is not stranded.
+    while (!draining_.exchange(true)) {
+        const double t0 = CkWallTimer();
+        bool over = false;
+        for (;;) {
+            {
+                std::lock_guard<UFSpinLock> g(qlock_);
+                if (lib_ == nullptr || pending_.empty()) break;
+                batch.swap(pending_);
+            }
+            for (size_t i = 0; i < batch.size(); i++) run(batch[i]);
+            batch.clear();
+            if (CkWallTimer() - t0 > spreadBudget()) {
+                over = true;
+                break;
+            }
+        }
+        draining_.store(false);
+        bool more;
+        {
+            std::lock_guard<UFSpinLock> g(qlock_);
+            more = lib_ != nullptr && !pending_.empty();
+        }
+        if (!more) return;
+        if (over) {
+            // the next free PE of this process takes the rest
+            thisProxy[CkMyNode()].drain();
+            return;
+        }
+        // work queued by a PE that lost the flag to us: drain again
+    }
+}
+
+void UFInbox::run(UFWork& w) {
+    switch (w.kind) {
+    case UFWork::Unions:
+        // union_request, not union_requests: the entry would forward back here
+        for (size_t i = 0; i < w.edges.size(); i++)
+            lib_->union_request(w.edges[i].a, w.edges[i].b);
+        break;
+    case UFWork::FindBoss:
+        lib_->insertDataFindBoss(w.fb);
+        break;
+#ifdef ANCHOR_ALGO
+    case UFWork::Anchor:
+        lib_->insertDataAnchor(w.an);
+        break;
+#endif
+    case UFWork::ShortCircuit:
+        lib_->short_circuit_parent(w.sc);
+        break;
+    case UFWork::Compress:
+        lib_->compress_path(w.arrIdx, (uint64_t)w.value);
+        break;
+    case UFWork::AddSize:
+        lib_->add_size(w.arrIdx, w.value);
+        break;
+    default:
+        CkAbort("UFInbox: unknown work kind %d\n", (int)w.kind);
+    }
+}
+
+void UFInbox::union_requests(const std::vector<UFEdge>& edges) {
+    UFWork w;
+    w.kind = UFWork::Unions;
+    w.edges = edges;
+    push(std::move(w));
+}
+
+void UFInbox::insertDataFindBoss(const findBossData& data) {
+    UFWork w;
+    w.kind = UFWork::FindBoss;
+    w.fb = data;
+    push(std::move(w));
+}
+
+#ifdef ANCHOR_ALGO
+void UFInbox::insertDataAnchor(const anchorData& data) {
+    UFWork w;
+    w.kind = UFWork::Anchor;
+    w.an = data;
+    push(std::move(w));
+}
+#endif
+
+void UFInbox::short_circuit_parent(shortCircuitData scd) {
+    UFWork w;
+    w.kind = UFWork::ShortCircuit;
+    w.sc = scd;
+    push(std::move(w));
+}
+
+void UFInbox::compress_path(uint64_t arrIdx, uint64_t compressedParent) {
+    UFWork w;
+    w.kind = UFWork::Compress;
+    w.arrIdx = arrIdx;
+    w.value = (int64_t)compressedParent;
+    push(std::move(w));
+}
+
+void UFInbox::add_size(uint64_t arrIdx, int64_t delta) {
+    UFWork w;
+    w.kind = UFWork::AddSize;
+    w.arrIdx = arrIdx;
+    w.value = delta;
+    push(std::move(w));
 }
 
 #include "unionFindLib.def.h"

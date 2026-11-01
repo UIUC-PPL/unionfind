@@ -12,12 +12,31 @@ module unionFindLib {
     readonly CProxy_Prefix prefixLibArray;
     readonly CkGroupID libGroupID;
 
+    // Per-process front door for the union phase (UF_SPREAD=1, one-per-node
+    // mode only): union-phase messages go here instead of to the array
+    // element, so any free PE of the process runs them, not just the
+    // element's home PE. See UFInbox in unionFindLib.h.
+    nodegroup UFInbox {
+        entry UFInbox();
+        entry void attach(uint64_t lib, int libIdx);
+        entry void union_requests(const std::vector<UFEdge>& edges);
+        entry void insertDataFindBoss(const findBossData & data);
+#ifdef ANCHOR_ALGO
+        entry void insertDataAnchor(const anchorData & data);
+#endif
+        entry void short_circuit_parent(shortCircuitData scd);
+        entry void compress_path(uint64_t arrIdx, uint64_t compressedParent);
+        entry void add_size(uint64_t arrIdx, long delta);
+        entry void drain();
+    };
+
     array[1D] UnionFindLib {
         entry UnionFindLib();
 
-        
-        // ready: contributed by every element once wired (see unionFindLib.h)
-        entry void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CkCallback ready);
+
+        // ready: contributed by every element once wired (see unionFindLib.h).
+        // inbox: the UFInbox when the union phase is spread, else null.
+        entry void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CProxy_UFInbox inbox, CkCallback ready);
         entry void enableLazyMode();
 
 

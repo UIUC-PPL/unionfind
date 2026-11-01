@@ -2,6 +2,8 @@
 #define UNION_FIND_LIB
 
 #include "unionFindLib.decl.h"
+#include <atomic>
+#include <mutex>
 #include <unordered_map>
 
 #ifdef AGGREGATION
@@ -102,6 +104,17 @@ class UnionFindLib : public CBase_UnionFindLib {
     tram_t* tram;
     tram_proxy_t myTramProxy;
 #endif
+    // Union-phase sends go to the destination process's UFInbox instead of
+    // the destination element when this is set (UF_SPREAD=1, one-per-node
+    // mode); see UFInbox below.
+    CProxy_UFInbox inbox_;
+    bool spread_ = false;
+    bool spread() const { return spread_; }
+    // This process's inbox and the library array it serves, for
+    // submitUnionRequests on any PE. Written by the element in
+    // passLibGroupID, before it contributes to `ready`.
+    static CProxy_UFInbox s_inbox;
+    static CkArrayID s_inboxFor;
 
     public:
     UnionFindLib() : myVertices(nullptr), numMyVertices(0) {}
@@ -159,8 +172,22 @@ class UnionFindLib : public CBase_UnionFindLib {
     }
     // -------------------------------------------------------------
 
-    void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CkCallback ready);
+    void passLibGroupID(CkGroupID lgid, CProxy_Prefix pla, CProxy_UFInbox inbox, CkCallback ready);
     static CProxy_UnionFindLib unionFindInit(CkArrayID clientArray, int n);
+    // UF_SPREAD=1: unionFindInitOnePerNode* route the union phase through a
+    // per-process UFInbox nodegroup (see below). Read once per process.
+    static bool spreadEnabled();
+    // A null inbox. Not CProxy_UFInbox(): outside CMK_ERROR_CHECKING builds a
+    // default-constructed group proxy leaves its group id uninitialized, so
+    // it is not null and isZero() on it reads garbage.
+    static CProxy_UFInbox noInbox();
+    // Submit a batch of union requests on behalf of the calling PE: to this
+    // process's UFInbox when `lib` is spread, else to element `chare` of
+    // `lib`. With spread on, use this (or union_requests) and never the
+    // single-edge union_request entry, which would run on the element's
+    // home PE alongside the inbox.
+    static void submitUnionRequests(const CProxy_UnionFindLib& lib, int chare,
+                                    const std::vector<UFEdge>& edges);
     // Client-facing API addition: one library chare per PROCESS, element i on
     // the first PE of node i (explicit insertion — NOT an array map; a
     // freshly created map group races with array construction on runtimes
@@ -300,6 +327,78 @@ class UnionFindLibGroup : public CBase_UnionFindLibGroup {
     void increase_message_count();
     void contribute_count();
     void done_profiling(int);
+};
+
+// One queued union-phase message, as UFInbox holds it until a drain runs it.
+struct UFWork {
+    enum Kind : uint8_t { Unions, FindBoss, Anchor, ShortCircuit, Compress, AddSize };
+    Kind kind;
+    uint64_t arrIdx = 0;  // Compress, AddSize
+    int64_t value = 0;    // Compress: compressedParent; AddSize: delta
+    findBossData fb;
+    shortCircuitData sc;
+#ifdef ANCHOR_ALGO
+    anchorData an;
+#endif
+    std::vector<UFEdge> edges;
+};
+
+// Spinlock for UFInbox's queue. The critical sections are a vector push or
+// swap, so a sleeping mutex would cost more than it saves.
+class UFSpinLock {
+    std::atomic<bool> held_;
+  public:
+    UFSpinLock() : held_(false) {}
+    void lock() {
+        while (held_.exchange(true, std::memory_order_acquire))
+            while (held_.load(std::memory_order_relaxed)) {}
+    }
+    void unlock() { held_.store(false, std::memory_order_release); }
+};
+
+// Per-process front door for the union phase (UF_SPREAD=1 with
+// unionFindInitOnePerNode*). The array element sits on its process's first
+// PE (UFNodeMap), so otherwise every union batch and cascade message runs
+// there, behind whatever else that PE is doing. In paratreet2's FoF3 that is
+// the phase-3 walk: a few of those PEs set the walk's end (paratreet2
+// design/walk-optimization-brief.txt, rank-0 test). A nodegroup message can
+// run on any PE of the process, so here the union phase runs on whichever PE
+// is free.
+//
+// The element's code is unchanged and not thread-safe, so one PE runs it at a
+// time. [exclusive] would give that, but a busy lock re-enqueues the message,
+// and reconverse takes node messages ahead of local work, so every PE of the
+// process would cycle through the retries. Instead each entry queues its work
+// and returns, and the PE that wins the drain flag runs everything queued. A
+// drain past UF_SPREAD_BUDGET_US (default 200) passes the rest to the next
+// free PE with a drain() message.
+//
+// QD: work is queued only by an entry that then drains it, or that lost the
+// flag to a PE which rechecks the queue after releasing it. So some PE is
+// inside an entry until the queue is empty, and QD cannot fire before. The
+// labeling entries (find_components onward) still go to the element; they
+// run after the caller's QD, which also orders memory between the PEs.
+class UFInbox : public CBase_UFInbox {
+    UFSpinLock qlock_;             // guards pending_ and lib_
+    std::vector<UFWork> pending_;
+    UnionFindLib* lib_ = nullptr;  // this process's element, from attach()
+    std::atomic<bool> draining_;
+    void push(UFWork&& w);
+    void tryDrain();
+    void run(UFWork& w);
+  public:
+    UFInbox() : draining_(false) {}
+    UFInbox(CkMigrateMessage*) : draining_(false) {}
+    void attach(uint64_t lib, int libIdx);
+    void union_requests(const std::vector<UFEdge>& edges);
+    void insertDataFindBoss(const findBossData& data);
+#ifdef ANCHOR_ALGO
+    void insertDataAnchor(const anchorData& data);
+#endif
+    void short_circuit_parent(shortCircuitData scd);
+    void compress_path(uint64_t arrIdx, uint64_t compressedParent);
+    void add_size(uint64_t arrIdx, int64_t delta);
+    void drain() { tryDrain(); }
 };
 
 // Client-facing API addition: array map placing element i on the first PE of
