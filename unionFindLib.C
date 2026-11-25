@@ -1598,7 +1598,9 @@ unionFindInitOnePerNode(const CkCallback& ready, CProxy_UFNodeMap node_map,
     #if defined(AGGREGATION) || defined(CONCURRENT_COMPRESSION_WAVE)
         // htram delivers into the element directly, and the wave's entries
         // run on the element; either would race with the inbox's drains.
-        CkAbort("UnionFindLib: spread (UF_SPREAD) is incompatible with "
+        // ::CkAbort: this is a static member function, and the unqualified
+        // name finds the non-static member CkMigratable::CkAbort.
+        ::CkAbort("UnionFindLib: spread (UF_SPREAD) is incompatible with "
                 "AGGREGATION and CONCURRENT_COMPRESSION_WAVE builds\n");
     #endif
         inbox = CProxy_UFInbox::ckNew();
