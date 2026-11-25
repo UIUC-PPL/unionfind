@@ -10,6 +10,7 @@ mainmodule mesh {
     mainchare Main {
         entry Main(CkArgMsg *m);
         entry void doneInvertedTree();
+        entry void unionsDelivered();
         entry void doneFindComponents();
         entry [reductiontarget] void donePrinting();
     }
