@@ -12,6 +12,7 @@ mainmodule graph {
         entry Main(CkArgMsg *m);
         entry [reductiontarget] void startWork();
         entry void done();
+        entry void unionsDelivered();
         entry void doneFindComponents();
         entry [reductiontarget] void donePrinting();
     }

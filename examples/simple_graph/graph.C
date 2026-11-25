@@ -64,6 +64,14 @@ class Main : public CBase_Main {
     }
 
     void done() {
+        // Quiescence means no union message is in flight. In an AGGREGATION
+        // build, union items can still be in htram buffers, which quiescence
+        // detection does not see. quiesce() flushes them and waits for their
+        // processing; without AGGREGATION it calls back at once.
+        libProxy[0].quiesce(CkCallback(CkIndex_Main::unionsDelivered(), thisProxy));
+    }
+
+    void unionsDelivered() {
         CkPrintf("[Main] Inverted trees constructed. Notify library to perform components detection\n");
         CkPrintf("[Main] Tree construction time: %f\n", CkWallTimer()-startTime);
         componentDetectionStartTime = CkWallTimer();
